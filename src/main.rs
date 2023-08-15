@@ -1,5 +1,5 @@
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
-use async_graphql::{http::GraphiQLSource, EmptyMutation, EmptySubscription, Schema};
+use async_graphql::{http::GraphiQLSource, EmptyMutation, EmptySubscription, Schema, extensions::Tracing};
 use tokio::signal;
 use axum::{
     extract::Extension,
@@ -7,6 +7,8 @@ use axum::{
     routing::get,
     Router, Server,
 };
+use tracing::{info, Level};
+use tracing_subscriber::FmtSubscriber;
 mod model;
 
 async fn graphql_handler(
@@ -22,7 +24,13 @@ async fn graphiql() -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() {
-    let schema = Schema::new(model::QueryRoot, EmptyMutation, EmptySubscription);
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::DEBUG)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    let schema = Schema::build(model::Query, EmptyMutation, EmptySubscription)
+        .extension(Tracing)
+        .finish();
 
     let app = Router::new()
         .route("/", get(graphiql).post(graphql_handler))

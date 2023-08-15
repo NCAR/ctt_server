@@ -1,19 +1,35 @@
 use async_graphql::{
-    Context, Object, Result, Schema, EmptyMutation, EmptySubscription, Enum, Union
+    Context, Object, Result, Schema, EmptyMutation, EmptySubscription, Enum, ComplexObject, SimpleObject
 };
 use pyo3::{Python, PyErr};
 use pyo3::types::PyModule;
 use serde::{Serialize,Deserialize};
 use chrono::NaiveDateTime;
 
-pub type CttSchema = Schema<QueryRoot, EmptyMutation, EmptySubscription>;
+pub type CttSchema = Schema<Query, EmptyMutation, EmptySubscription>;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, SimpleObject)]
+#[graphql(complex)]
 pub struct Issue {
     id: u32,
     target: String,
     issue_status: IssueStatus,
+    assigned_to: String,
+    title: String,
+    description: String,
+    enforce_down: bool,
+    down_siblings: bool,
 }
+
+#[derive(Serialize, Deserialize, Enum, Copy, Clone, Eq, PartialEq)]
+pub enum NodeStatus {
+    ONLINE,
+    DRAINING,
+    DRAINED,
+    OFFLINE,
+    UNKNOWN,
+}
+
 
 #[derive(Serialize, Deserialize, Enum, Copy, Clone, Eq, PartialEq)]
 pub enum IssueStatus {
@@ -21,44 +37,15 @@ pub enum IssueStatus {
     CLOSED,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, SimpleObject)]
 pub struct Comment {
     author: String,
     date: NaiveDateTime,
     comment: String,
 }
 
-#[Object]
-impl Comment {
-    async fn author(&self) -> &String {
-        &self.author
-    }
-
-    async fn date(&self) -> String {
-        let d = self.date.clone().to_string();
-        d
-    }
-
-    async fn comment(&self) -> &String {
-        &self.comment
-    }
-}
-
-
-#[Object]
+#[ComplexObject]
 impl Issue {
-    async fn id(&self) -> &u32 {
-        &self.id
-    }
-
-    async fn target(&self) -> &String {
-        &self.target
-    }
-
-    async fn issue_status(&self) -> &IssueStatus {
-        &self.issue_status 
-    }
-
     async fn comments(&self) -> Vec<Comment> {
         let id = self.id.clone();
         tokio::task::spawn_blocking(move || {
@@ -100,21 +87,72 @@ nks/projects/ctt/conf/secrets.ini",), None).unwrap();
             Ok(Issue{
                 id: issue.getattr("id").unwrap().extract().unwrap(),
                 target: issue.getattr("target").unwrap().to_string(),
-                issue_status: issue_status
+                issue_status: issue_status,
+                assigned_to: issue.getattr("assigned_to").unwrap().to_string(),
+                title: issue.getattr("title").unwrap().to_string(),
+                description: issue.getattr("description").unwrap().to_string(),
+                enforce_down: issue.getattr("enforce_down").unwrap().extract().unwrap(),
+                down_siblings: issue.getattr("down_siblings").unwrap().extract().unwrap(),
             })
         })
     }).await.unwrap()
 }
 
-pub struct QueryRoot;
+async fn issues(_ctx: &Context<'_>) -> Result<Vec<Issue>, PyErr> {
+    tokio::task::spawn_blocking(move || {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| -> Result<Vec<Issue>, PyErr> {
+            let ctt_module = PyModule::import(py, "ctt").unwrap();
+            let conf = ctt_module.getattr("get_config").unwrap().call(("/home/shanks/projects/ctt/conf/ctt.ini","/home/s
+nks/projects/ctt/conf/secrets.ini",), None).unwrap();
+            let ctt = ctt_module.getattr("CTT").unwrap().call((conf,), None).unwrap();
+            let issues = ctt.call_method0("issue_list").unwrap();
+            let mut resp = Vec::new();
+            for i in issues.iter().unwrap() {
+                let issue = i.unwrap();
+                let issue_status = { if issue.getattr("status").unwrap().to_string() == "IssueStatus.OPEN" 
+                    {IssueStatus::OPEN} else {IssueStatus::CLOSED}};
+                resp.push(Issue{
+                id: issue.getattr("id").unwrap().extract().unwrap(),
+                target: issue.getattr("target").unwrap().to_string(),
+                issue_status: issue_status,
+                assigned_to: issue.getattr("assigned_to").unwrap().to_string(),
+                title: issue.getattr("title").unwrap().to_string(),
+                description: issue.getattr("description").unwrap().to_string(),
+                enforce_down: issue.getattr("enforce_down").unwrap().extract().unwrap(),
+                down_siblings: issue.getattr("down_siblings").unwrap().extract().unwrap(),
+                });
+            }
+            Ok(resp)
+        })
+    }).await.unwrap()
+}
+
+pub struct Query;
 
 #[Object]
-impl QueryRoot {
+impl Query {
     async fn issue<'a>(
         &self,
         ctx: &Context<'a>,
         issue: u32
     ) -> Option<Issue> {
         issue_from_id(ctx, issue).await.ok()
+    }
+
+    async fn issues<'a>(
+        &self,
+        ctx: &Context<'a>,
+        issue_status: Option<IssueStatus>,
+        target: Option<String>,
+    ) -> Vec<Issue> {
+        let mut issues = issues(ctx).await.unwrap();
+        if let Some(status) = issue_status {
+            issues = issues.into_iter().filter(|x| x.issue_status == status).collect()
+        }
+        if let Some(t) = target {
+            issues = issues.into_iter().filter(|x| x.target == t).collect()
+        }
+        issues
     }
 }
