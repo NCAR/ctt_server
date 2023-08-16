@@ -1,12 +1,12 @@
+use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
-use async_graphql::{http::GraphiQLSource, EmptySubscription, Schema, extensions::Tracing};
-use tokio::signal;
 use axum::{
     extract::Extension,
     response::{self, IntoResponse},
     routing::get,
     Router, Server,
 };
+use tokio::signal;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 mod model;
@@ -40,8 +40,7 @@ async fn main() {
 
     Server::bind(&"127.0.0.1:8000".parse().unwrap())
         .serve(app.into_make_service())
-        .with_graceful_shutdown(async{signal::ctrl_c().await.unwrap()})
+        .with_graceful_shutdown(async { signal::ctrl_c().await.unwrap() })
         .await
         .unwrap();
 }
-
