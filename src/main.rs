@@ -1,5 +1,5 @@
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
-use async_graphql::{http::GraphiQLSource, EmptyMutation, EmptySubscription, Schema, extensions::Tracing};
+use async_graphql::{http::GraphiQLSource, EmptySubscription, Schema, extensions::Tracing};
 use tokio::signal;
 use axum::{
     extract::Extension,
@@ -7,7 +7,7 @@ use axum::{
     routing::get,
     Router, Server,
 };
-use tracing::{info, Level};
+use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 mod model;
 
@@ -28,7 +28,7 @@ async fn main() {
         .with_max_level(Level::DEBUG)
         .finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
-    let schema = Schema::build(model::Query, EmptyMutation, EmptySubscription)
+    let schema = Schema::build(model::Query, model::Mutation, EmptySubscription)
         .extension(Tracing)
         .finish();
 
