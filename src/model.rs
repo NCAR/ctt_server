@@ -12,24 +12,32 @@ pub type CttSchema = Schema<Query, Mutation, EmptySubscription>;
 #[derive(Serialize, Deserialize, SimpleObject)]
 #[graphql(complex)]
 pub struct Issue {
-    id: u32,
-    target: String,
-    issue_status: IssueStatus,
     assigned_to: String,
-    title: String,
     description: String,
-    enforce_down: bool,
     down_siblings: bool,
+    enforce_down: bool,
+    id: u32,
+    issue_status: IssueStatus,
+    target: String,
+    title: String,
 }
 
 #[derive(InputObject)]
+pub struct UpdateIssue {
+    assigned_to: Option<String>,
+    description: Option<String>,
+    enforce_down: Option<bool>,
+    id: u32,
+    title: Option<String>,
+}
+#[derive(InputObject)]
 pub struct NewIssue {
-    target: String,
     assigned_to: String,
-    title: String,
     description: String,
+    down_siblings: bool,
     enforce_down: bool,
-    created_by: String,
+    target: String,
+    title: String,
 }
 
 #[derive(Serialize, Deserialize, Enum, Copy, Clone, Eq, PartialEq)]
@@ -55,13 +63,13 @@ pub struct Comment {
 }
 
 impl NewIssue {
-    async fn open(&self) -> u32 {
+    async fn open(&self, operator: String) -> u32 {
         let target = self.target.clone();
         let assigned_to = self.assigned_to.clone();
         let title = self.title.clone();
         let description = self.description.clone();
         let enforce_down = self.enforce_down.clone();
-        let created_by = self.created_by.clone();
+        let created_by = operator.clone();
         tokio::task::spawn_blocking(move || {
             pyo3::prepare_freethreaded_python();
             Python::with_gil(|py| -> Result<u32, PyErr> {
@@ -318,11 +326,118 @@ pub struct Mutation;
 #[Object]
 impl Mutation {
     async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Issue {
-        issue_from_id(ctx, issue.open().await).await.unwrap()
+        //TODO get operator from authentication
+        issue_from_id(ctx, issue.open("todo".to_string()).await)
+            .await
+            .unwrap()
     }
-    async fn close<'a>(&self, ctx: &Context<'a>, issue: u32, comment: String) -> String {
+    async fn close<'a>(&self, issue: u32, comment: String) -> String {
         //TODO get operator from authentication
         issue_close(issue, "todo".to_string(), comment).await;
         "Closed".to_string()
+    }
+    async fn update<'a>(&self, ctx: &Context<'a>, issue: UpdateIssue) -> Issue {
+        //TODO get operator from authentication
+        tokio::task::spawn_blocking(move || {
+            pyo3::prepare_freethreaded_python();
+            Python::with_gil(|py| -> Result<(), PyErr> {
+                let ctt_module = PyModule::import(py, "ctt").unwrap();
+                let conf = ctt_module
+                    .getattr("get_config")
+                    .unwrap()
+                    .call(
+                        (
+                            "/home/shanks/projects/ctt/conf/ctt.ini",
+                            "/home/shanks/projects/ctt/conf/secrets.ini",
+                        ),
+                        None,
+                    )
+                    .unwrap();
+                let ctt = ctt_module
+                    .getattr("CTT")
+                    .unwrap()
+                    .call((conf,), None)
+                    .unwrap();
+                let kwargs = PyDict::new(py);
+                if let Some(a) = issue.assigned_to {
+                    kwargs.set_item("assigned_to", a);
+                }
+                if let Some(a) = issue.description {
+                    kwargs.set_item("description", a);
+                }
+                if let Some(a) = issue.enforce_down {
+                    kwargs.set_item("enforce_down", a);
+                }
+                if let Some(a) = issue.title {
+                    kwargs.set_item("title", a);
+                }
+                ctt.call_method("update", (issue.id, kwargs), None).unwrap();
+                Ok(())
+            })
+            .unwrap()
+        })
+        .await
+        .unwrap();
+        issue_from_id(ctx, issue.id).await.unwrap()
+    }
+    async fn drain(&self, issue: u32) -> String {
+        tokio::task::spawn_blocking(move || {
+            pyo3::prepare_freethreaded_python();
+            Python::with_gil(|py| -> Result<(), PyErr> {
+                let ctt_module = PyModule::import(py, "ctt").unwrap();
+                let conf = ctt_module
+                    .getattr("get_config")
+                    .unwrap()
+                    .call(
+                        (
+                            "/home/shanks/projects/ctt/conf/ctt.ini",
+                            "/home/shanks/projects/ctt/conf/secrets.ini",
+                        ),
+                        None,
+                    )
+                    .unwrap();
+                let ctt = ctt_module
+                    .getattr("CTT")
+                    .unwrap()
+                    .call((conf,), None)
+                    .unwrap();
+                ctt.call_method1("prep_for_work", (issue, "todo")).unwrap();
+                Ok(())
+            })
+            .unwrap()
+        })
+        .await
+        .unwrap();
+        "drained".to_string()
+    }
+    async fn release(&self, issue: u32) -> String {
+        tokio::task::spawn_blocking(move || {
+            pyo3::prepare_freethreaded_python();
+            Python::with_gil(|py| -> Result<(), PyErr> {
+                let ctt_module = PyModule::import(py, "ctt").unwrap();
+                let conf = ctt_module
+                    .getattr("get_config")
+                    .unwrap()
+                    .call(
+                        (
+                            "/home/shanks/projects/ctt/conf/ctt.ini",
+                            "/home/shanks/projects/ctt/conf/secrets.ini",
+                        ),
+                        None,
+                    )
+                    .unwrap();
+                let ctt = ctt_module
+                    .getattr("CTT")
+                    .unwrap()
+                    .call((conf,), None)
+                    .unwrap();
+                ctt.call_method1("end_work", (issue, "todo")).unwrap();
+                Ok(())
+            })
+            .unwrap()
+        })
+        .await
+        .unwrap();
+        "released".to_string()
     }
 }
