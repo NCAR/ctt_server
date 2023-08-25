@@ -1,8 +1,8 @@
 use async_graphql::{
-    ComplexObject, Context, EmptySubscription, Enum, InputObject, Object, Result, Schema,
+    ComplexObject, Context, EmptySubscription, Enum, Guard, InputObject, Object, Result, Schema,
     SimpleObject,
 };
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use pyo3::types::{PyDict, PyModule};
 use pyo3::{PyErr, Python};
 use serde::{Deserialize, Serialize};
@@ -32,10 +32,10 @@ pub struct UpdateIssue {
 }
 #[derive(InputObject)]
 pub struct NewIssue {
-    assigned_to: String,
+    assigned_to: Option<String>,
     description: String,
-    down_siblings: bool,
-    enforce_down: bool,
+    down_siblings: Option<bool>,
+    enforce_down: Option<bool>,
     target: String,
     title: String,
 }
@@ -63,13 +63,14 @@ pub struct Comment {
 }
 
 impl NewIssue {
-    async fn open(&self, operator: String) -> u32 {
+    async fn open(&self, operator: &str) -> u32 {
         let target = self.target.clone();
         let assigned_to = self.assigned_to.clone();
         let title = self.title.clone();
         let description = self.description.clone();
         let enforce_down = self.enforce_down.clone();
-        let created_by = operator.clone();
+        let down_siblings = self.down_siblings.clone();
+        let created_by = operator.to_string();
         tokio::task::spawn_blocking(move || {
             pyo3::prepare_freethreaded_python();
             Python::with_gil(|py| -> Result<u32, PyErr> {
@@ -80,8 +81,7 @@ impl NewIssue {
                     .call(
                         (
                             "/home/shanks/projects/ctt/conf/ctt.ini",
-                            "/home/s
-    nks/projects/ctt/conf/secrets.ini",
+                            "/home/shanks/projects/ctt/conf/secrets.ini",
                         ),
                         None,
                     )
@@ -93,11 +93,22 @@ impl NewIssue {
                     .unwrap();
                 let kwargs = PyDict::new(py);
                 kwargs.set_item("target", target);
-                kwargs.set_item("assigned_to", assigned_to);
+                if let Some(a) = assigned_to {
+                    kwargs.set_item("assigned_to", a);
+                }
                 kwargs.set_item("created_by", created_by);
                 kwargs.set_item("title", title);
                 kwargs.set_item("description", description);
-                kwargs.set_item("enforce_down", enforce_down);
+                if let Some(e) = enforce_down {
+                    kwargs.set_item("enforce_down", e);
+                } else {
+                    kwargs.set_item("enforce_down", false);
+                }
+                if let Some(d) = down_siblings {
+                    kwargs.set_item("down_siblings", d);
+                } else {
+                    kwargs.set_item("down_siblings", false);
+                }
                 let issue = ctt_module
                     .getattr("Issue")
                     .unwrap()
@@ -321,15 +332,63 @@ impl Query {
     }
 }
 
+#[derive(Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
+pub enum Role {
+    Admin,
+    Guest,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RoleGuard {
+    role: Role,
+    user: String,
+    exp: NaiveDateTime,
+}
+
+impl RoleGuard {
+    pub fn new(role: Role, user: String, exp: NaiveDateTime) -> Self {
+        Self { role, user, exp }
+    }
+}
+
+pub struct AuthGuard {
+    role: Role,
+    exp: NaiveDateTime,
+}
+impl AuthGuard {
+    fn new(role: Role) -> Self {
+        Self {
+            role: role,
+            exp: Utc::now().naive_utc(),
+        }
+    }
+}
+
+#[axum::async_trait]
+impl Guard for AuthGuard {
+    async fn check(&self, ctx: &Context<'_>) -> Result<()> {
+        let auth = ctx.data_opt::<RoleGuard>();
+        if auth.is_none() {
+            return Err("Forbidden".into());
+        }
+        let auth = auth.unwrap();
+        if auth.exp > self.exp && auth.role == self.role {
+            Ok(())
+        } else {
+            Err("Forbidden".into())
+        }
+    }
+}
+
 pub struct Mutation;
 
 #[Object]
 impl Mutation {
+    #[graphql(guard = "AuthGuard::new(Role::Admin)")]
     async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Issue {
         //TODO get operator from authentication
-        issue_from_id(ctx, issue.open("todo".to_string()).await)
-            .await
-            .unwrap()
+        let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
+        issue_from_id(ctx, issue.open(usr).await).await.unwrap()
     }
     async fn close<'a>(&self, issue: u32, comment: String) -> String {
         //TODO get operator from authentication
