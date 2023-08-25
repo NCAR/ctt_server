@@ -57,6 +57,7 @@ impl<B> ValidateRequest<B> for Auth
 }
 
 fn check_auth<B>(request: &axum::http::Request<B>) -> Option<model::RoleGuard> {
+    info!("checking auth");
     request.headers().get(header::AUTHORIZATION)
         .and_then(|auth_header| auth_header.to_str().ok())
         .and_then(|auth_value| {
@@ -78,10 +79,19 @@ struct UserLogin {
     timestamp: NaiveDateTime,
 }
 
-async fn login_handler(extract::Json(payload): extract::Json<UserLogin>) -> Result<axum::Json<String>,(StatusCode, String)> {
+#[derive(Serialize)]
+struct Token {
+    token: String,
+}
+
+async fn login_handler(extract::Json(payload): extract::Json<UserLogin>) -> Result<axum::Json<Token>,(StatusCode, String)> {
     info!("Login request: {:?}", payload);
     if payload.user != "shanks" {
+        info!("bad user");
         Err((StatusCode::FORBIDDEN, "User not authorized".to_string()))
+    } else if payload.timestamp > Utc::now().naive_utc() || payload.timestamp < Utc::now().naive_utc() - chrono::Duration::minutes(2) {
+        info!("bad timestamp");
+        Err((StatusCode::BAD_REQUEST, "bad timestamp".to_string()))
     } else {
         let key = EncodingKey::from_base64_secret(SKETCHY_SECRET).unwrap();
         let claims = model::RoleGuard::new(model::Role::Admin,"shanks".to_string(), Utc::now().naive_utc()+chrono::Duration::minutes(6000));
@@ -90,15 +100,17 @@ async fn login_handler(extract::Json(payload): extract::Json<UserLogin>) -> Resu
             &claims,
             &key,
         ).unwrap();
-        Ok(axum::Json(json!({"token": token}).to_string())) 
+        Ok(axum::Json(Token{token}))
     }
 }
 async fn graphql_handler(
     schema: Extension<model::CttSchema>,
-    _headers: HeaderMap,
+    Extension(role): Extension<model::RoleGuard>,
     req: GraphQLRequest,
 ) -> GraphQLResponse {
-    schema.execute(req.into_inner()).await.into()
+    let mut req = req.into_inner();
+    req = req.data(role);
+    schema.execute(req).await.into()
 }
 
 async fn graphiql() -> impl IntoResponse {

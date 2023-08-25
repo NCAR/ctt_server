@@ -332,13 +332,13 @@ impl Query {
     }
 }
 
-#[derive(Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Copy, Clone, Serialize, Deserialize, Debug)]
 pub enum Role {
     Admin,
     Guest,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RoleGuard {
     role: Role,
     pub user: String,
