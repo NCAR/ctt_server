@@ -4,15 +4,15 @@ use serde_json::json;
 use axum::{
     error_handling::HandleErrorLayer,
     extract::Extension,
-    http::header::HeaderMap,
+    http::header::{self, HeaderMap},
     response::{self, IntoResponse},
     routing::get,
     routing::post,
     Router, Server,
 };
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{encode, EncodingKey, Header, DecodingKey, Validation, decode, Algorithm};
 use chrono::{NaiveDateTime, Utc};
-use http::StatusCode;
+use http::{StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::signal;
@@ -27,6 +27,8 @@ use axum::body::BoxBody;
 use axum::extract;
 mod model;
 
+const SKETCHY_SECRET: &str = "6e313fae4b113e12c469edb558ccc92e331751efd5441c031802b04441efa7a3";
+
 #[derive(Clone, Copy)]
 struct Auth;
 
@@ -35,10 +37,11 @@ impl<B> ValidateRequest<B> for Auth
     type ResponseBody = axum::body::BoxBody;
 
     fn validate(&mut self, request: &mut axum::http::Request<B>) -> axum::response::Result<(), axum::response::Response> {
-            if let Some(user_id) = check_auth(&request) {
+            if let Some(user) = check_auth(&request) {
                 // Set `user_id` as a request extension so it can be accessed by other
                 // services down the stack.
-                request.extensions_mut().insert(user_id);
+                info!("Request validated for user {}", &user.user);
+                request.extensions_mut().insert(user);
 
                 Ok(())
             } else {
@@ -46,19 +49,50 @@ impl<B> ValidateRequest<B> for Auth
                     .status(StatusCode::UNAUTHORIZED)
                     .body(BoxBody::default())
                     .unwrap();
+                info!("Invalid request");
 
                 Err(unauthorized_response)
             }
     }
 }
 
-fn check_auth<B>(_request: &axum::http::Request<B>) -> Option<UserId> {
-    Some(UserId("foo".to_string()))
+fn check_auth<B>(request: &axum::http::Request<B>) -> Option<model::RoleGuard> {
+    request.headers().get(header::AUTHORIZATION)
+        .and_then(|auth_header| auth_header.to_str().ok())
+        .and_then(|auth_value| {
+            if auth_value.starts_with("Bearer ") {
+                Some(auth_value[7..].to_owned())
+            } else {
+                None
+            }
+        })
+        .and_then(|t| Some(decode::<model::RoleGuard>(&t, &DecodingKey::from_base64_secret(SKETCHY_SECRET).unwrap(), &Validation::new(Algorithm::HS256)).unwrap()))
+        .and_then(|c| Some(c.claims))
+
+    //Some(model::RoleGuard::new(model::Role::Admin, "shanks".to_string(), Utc::now().naive_utc()))
 }
 
-#[derive(Debug)]
-struct UserId(String);
+#[derive(Deserialize, Debug)]
+struct UserLogin {
+    user: String,
+    timestamp: NaiveDateTime,
+}
 
+async fn login_handler(extract::Json(payload): extract::Json<UserLogin>) -> Result<axum::Json<String>,(StatusCode, String)> {
+    info!("Login request: {:?}", payload);
+    if payload.user != "shanks" {
+        Err((StatusCode::FORBIDDEN, "User not authorized".to_string()))
+    } else {
+        let key = EncodingKey::from_base64_secret(SKETCHY_SECRET).unwrap();
+        let claims = model::RoleGuard::new(model::Role::Admin,"shanks".to_string(), Utc::now().naive_utc()+chrono::Duration::minutes(6000));
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &key,
+        ).unwrap();
+        Ok(axum::Json(json!({"token": token}).to_string())) 
+    }
+}
 async fn graphql_handler(
     schema: Extension<model::CttSchema>,
     _headers: HeaderMap,
@@ -74,28 +108,6 @@ async fn graphiql() -> impl IntoResponse {
 async fn schema_handler() -> impl IntoResponse {
     let schema = Schema::new(model::Query, model::Mutation, EmptySubscription);
     schema.sdl()
-}
-
-#[derive(Deserialize, Debug)]
-struct UserLogin {
-    user: String,
-    timestamp: NaiveDateTime,
-}
-
-async fn login_handler(extract::Json(payload): extract::Json<UserLogin>) -> Result<axum::Json<String>,(StatusCode, String)> {
-    info!("Login request: {:?}", payload);
-    if payload.user != "shanks" {
-        Err((StatusCode::FORBIDDEN, "User not authorized".to_string()))
-    } else {
-        let key = EncodingKey::from_base64_secret("6e313fae4b113e12c469edb558ccc92e331751efd5441c031802b04441efa7a3").unwrap();
-        let claims = model::RoleGuard::new(model::Role::Admin,"shanks".to_string(), Utc::now().naive_utc()+chrono::Duration::minutes(60));
-        let token = encode(
-            &Header::default(),
-            &claims,
-            &key,
-        ).unwrap();
-        Ok(axum::Json(json!({"token": token}).to_string())) 
-    }
 }
 
 async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (StatusCode, String) {
@@ -118,10 +130,12 @@ async fn main() {
     let app = Router::new()
         .route("/", get(graphiql))
         .route("/api", post(graphql_handler))
-        .route("/api/schema", get(schema_handler))
         .route_layer(Extension(schema))
+        .route("/api/schema", get(schema_handler))
         .route_layer(ValidateRequestHeaderLayer::custom(Auth))
+        //login route can't be protected by auth
         .route("/login", post(login_handler))
+        //add logging and timeout to all requests
         .layer(
             ServiceBuilder::new()
                 // `timeout` will produce an error if the handler takes

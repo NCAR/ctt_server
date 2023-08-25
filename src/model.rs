@@ -341,50 +341,21 @@ pub enum Role {
 #[derive(Serialize, Deserialize)]
 pub struct RoleGuard {
     role: Role,
-    user: String,
-    exp: NaiveDateTime,
+    pub user: String,
+    pub exp: usize,
 }
 
 impl RoleGuard {
     pub fn new(role: Role, user: String, exp: NaiveDateTime) -> Self {
-        Self { role, user, exp }
+        Self { role, user, exp: exp.timestamp() as usize }
     }
 }
 
-pub struct AuthGuard {
-    role: Role,
-    exp: NaiveDateTime,
-}
-impl AuthGuard {
-    fn new(role: Role) -> Self {
-        Self {
-            role: role,
-            exp: Utc::now().naive_utc(),
-        }
-    }
-}
-
-#[axum::async_trait]
-impl Guard for AuthGuard {
-    async fn check(&self, ctx: &Context<'_>) -> Result<()> {
-        let auth = ctx.data_opt::<RoleGuard>();
-        if auth.is_none() {
-            return Err("Forbidden".into());
-        }
-        let auth = auth.unwrap();
-        if auth.exp > self.exp && auth.role == self.role {
-            Ok(())
-        } else {
-            Err("Forbidden".into())
-        }
-    }
-}
 
 pub struct Mutation;
 
 #[Object]
 impl Mutation {
-    #[graphql(guard = "AuthGuard::new(Role::Admin)")]
     async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Issue {
         //TODO get operator from authentication
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
