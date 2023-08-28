@@ -2,6 +2,7 @@ use async_graphql::{
     ComplexObject, Context, EmptySubscription, Enum, Guard, InputObject, Object, Result, Schema,
     SimpleObject,
 };
+use async_trait;
 use chrono::{NaiveDateTime, Utc};
 use pyo3::types::{PyDict, PyModule};
 use pyo3::{PyErr, Python};
@@ -308,10 +309,12 @@ pub struct Query;
 
 #[Object]
 impl Query {
+    #[graphql(guard = "RoleChecker::new(Role::Admin).or(RoleChecker::new(Role::Guest))")]
     async fn issue<'a>(&self, ctx: &Context<'a>, issue: u32) -> Option<Issue> {
         issue_from_id(ctx, issue).await.ok()
     }
 
+    #[graphql(guard = "RoleChecker::new(Role::Admin).or(RoleChecker::new(Role::Guest))")]
     async fn issues<'a>(
         &self,
         ctx: &Context<'a>,
@@ -351,21 +354,44 @@ impl RoleGuard {
     }
 }
 
+struct RoleChecker {
+    role: Role,
+}
+impl RoleChecker {
+    fn new(role: Role) -> Self {
+        Self { role }
+    }
+}
+
+#[async_trait::async_trait]
+impl Guard for RoleChecker {
+    async fn check(&self, ctx: &Context<'_>) -> Result<()> {
+        if ctx.data_opt::<RoleGuard>().ok_or("no role")?.role == self.role {
+            Ok(())
+        } else {
+            Err("Insufficient Permission".into())
+        }
+    }
+}
+
 
 pub struct Mutation;
 
 #[Object]
 impl Mutation {
+    #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Issue {
         //TODO get operator from authentication
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         issue_from_id(ctx, issue.open(usr).await).await.unwrap()
     }
+    #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn close<'a>(&self, issue: u32, comment: String) -> String {
         //TODO get operator from authentication
         issue_close(issue, "todo".to_string(), comment).await;
         "Closed".to_string()
     }
+    #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn update<'a>(&self, ctx: &Context<'a>, issue: UpdateIssue) -> Issue {
         //TODO get operator from authentication
         tokio::task::spawn_blocking(move || {
@@ -410,6 +436,7 @@ impl Mutation {
         .unwrap();
         issue_from_id(ctx, issue.id).await.unwrap()
     }
+    #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn drain(&self, issue: u32) -> String {
         tokio::task::spawn_blocking(move || {
             pyo3::prepare_freethreaded_python();
@@ -440,6 +467,7 @@ impl Mutation {
         .unwrap();
         "drained".to_string()
     }
+    #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn release(&self, issue: u32) -> String {
         tokio::task::spawn_blocking(move || {
             pyo3::prepare_freethreaded_python();

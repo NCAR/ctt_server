@@ -1,6 +1,9 @@
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
+use std::ffi::OsString;
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
 use serde_json::json;
+use std::collections::HashSet;
+use users;
 use axum::{
     error_handling::HandleErrorLayer,
     extract::Extension,
@@ -84,17 +87,41 @@ struct Token {
     token: String,
 }
 
+async fn check_role(usr: &str) -> Option<model::Role> {
+    let groups: HashSet<String> = users::get_user_by_name(usr)?.groups()?.iter().map(|g| g.name().to_os_string().into_string()).filter_map(|x| x.ok()).collect();
+    println!("{:?}", &groups);
+    let admin = vec!("rdoot", "dhsg");
+    let guest = vec!("shanks");
+    for g in admin {
+        if groups.contains(g) {
+            info!("admin!");
+            return Some(model::Role::Admin);
+        }
+    }
+    for g in guest {
+        if groups.contains(g) {
+            info!("guest!");
+            return Some(model::Role::Guest);
+        }
+    }
+    None
+}
+
+
 async fn login_handler(extract::Json(payload): extract::Json<UserLogin>) -> Result<axum::Json<Token>,(StatusCode, String)> {
     info!("Login request: {:?}", payload);
-    if payload.user != "shanks" {
+    let role = check_role(&payload.user).await;
+    if role.is_none() {
         info!("bad user");
-        Err((StatusCode::FORBIDDEN, "User not authorized".to_string()))
-    } else if payload.timestamp > Utc::now().naive_utc() || payload.timestamp < Utc::now().naive_utc() - chrono::Duration::minutes(2) {
+        return Err((StatusCode::FORBIDDEN, "User not authorized".to_string()))
+    }
+    let role = role.unwrap();
+    if payload.timestamp > Utc::now().naive_utc() || payload.timestamp < Utc::now().naive_utc() - chrono::Duration::minutes(2) {
         info!("bad timestamp");
         Err((StatusCode::BAD_REQUEST, "bad timestamp".to_string()))
     } else {
         let key = EncodingKey::from_base64_secret(SKETCHY_SECRET).unwrap();
-        let claims = model::RoleGuard::new(model::Role::Admin,"shanks".to_string(), Utc::now().naive_utc()+chrono::Duration::minutes(6000));
+        let claims = model::RoleGuard::new(role,payload.user, Utc::now().naive_utc()+chrono::Duration::minutes(6000));
         let token = encode(
             &Header::default(),
             &claims,
@@ -110,7 +137,9 @@ async fn graphql_handler(
 ) -> GraphQLResponse {
     let mut req = req.into_inner();
     req = req.data(role);
-    schema.execute(req).await.into()
+    let resp = schema.execute(req).await;
+    info!("{:?}", &resp);
+    resp.into()
 }
 
 async fn graphiql() -> impl IntoResponse {
