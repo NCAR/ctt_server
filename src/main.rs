@@ -1,4 +1,5 @@
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
+use axum_server::tls_rustls::RustlsConfig;
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
 use axum::{
     error_handling::HandleErrorLayer,
@@ -11,10 +12,14 @@ use axum::{
 use http::StatusCode;
 use std::time::Duration;
 use tokio::signal;
+use tokio::time::sleep;
+use axum_server::Handle;
 use tower::ServiceBuilder;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
+use std::path::PathBuf;
+use std::net::SocketAddr;
 mod auth;
 mod model;
 
@@ -56,6 +61,21 @@ async fn main() {
         .extension(Tracing)
         .finish();
 
+    // configure certificate and private key used by https
+    let config = RustlsConfig::from_pem_file(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("certs")
+            .join("cert.pem"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("certs")
+            .join("key.pem"),
+    )
+    .await
+    .unwrap();
+
+    let handle = Handle::new();
+    tokio::spawn(graceful_shutdown(handle.clone()));
+
     let app = Router::new()
         .route("/", get(graphiql))
         .route("/api", post(graphql_handler))
@@ -76,9 +96,22 @@ async fn main() {
 
     info!("GraphiQL IDE: http://localhost:8000");
 
-    Server::bind(&"127.0.0.1:8000".parse().unwrap())
+        // run https server
+    let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
+    axum_server::bind_rustls(addr, config)
+        .handle(handle)
         .serve(app.into_make_service())
-        .with_graceful_shutdown(async { signal::ctrl_c().await.unwrap() })
+      //  .with_graceful_shutdown(async { signal::ctrl_c().await.unwrap() })
         .await
         .unwrap();
+}
+
+async fn graceful_shutdown(handle: Handle) {
+   signal::ctrl_c().await.unwrap();
+   handle.graceful_shutdown(Some(Duration::from_secs(30)));
+   loop {
+        sleep(Duration::from_secs(1)).await;
+
+        println!("alive connections: {}", handle.connection_count());
+   }
 }
