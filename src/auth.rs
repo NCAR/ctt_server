@@ -5,13 +5,24 @@ use axum::http::header;
 use chrono::{NaiveDateTime, Utc};
 use http::StatusCode;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use lazy_static::lazy_static;
+use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tower_http::validate_request::ValidateRequest;
 use tracing::{debug, info};
 use users;
 
-const SKETCHY_SECRET: &str = "6e313fae4b113e12c469edb558ccc92e331751efd5441c031802b04441efa7a3";
+lazy_static! {
+    static ref SECRET: String = {
+        let s = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(64)
+            .map(char::from)
+            .collect::<String>();
+        s
+    };
+}
 
 #[derive(Clone, Copy)]
 pub struct Auth;
@@ -60,7 +71,7 @@ fn check_auth<B>(request: &axum::http::Request<B>) -> Option<RoleGuard> {
             Some(
                 decode::<RoleGuard>(
                     &t,
-                    &DecodingKey::from_base64_secret(SKETCHY_SECRET).unwrap(),
+                    &DecodingKey::from_base64_secret(&SECRET).unwrap(),
                     &Validation::new(Algorithm::HS256),
                 )
                 .unwrap(),
@@ -83,8 +94,11 @@ pub struct Token {
 async fn check_role(usr: &str, uid: u32) -> Option<Role> {
     let user = users::get_user_by_name(usr)?;
     if user.uid() != uid {
-        debug!("UID does not match expected user: {:?} expected uid: {}", usr, uid);
-        return None
+        debug!(
+            "UID does not match expected user: {:?} expected uid: {}",
+            usr, uid
+        );
+        return None;
     }
     let groups: HashSet<String> = user
         .groups()?
@@ -113,7 +127,7 @@ async fn check_role(usr: &str, uid: u32) -> Option<Role> {
 #[derive(Deserialize, Debug)]
 pub enum AuthRequest {
     // munge encrypted Json<UserLogin>
-    Munge(String)
+    Munge(String),
 }
 
 pub async fn login_handler(
@@ -123,14 +137,20 @@ pub async fn login_handler(
         AuthRequest::Munge(payload) => {
             let payload = munge_auth::unmunge(payload);
             if let Err(_) = payload {
-                return Err((StatusCode::BAD_REQUEST, "Unable to deserialize request".to_string()));
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "Unable to deserialize request".to_string(),
+                ));
             }
             let payload: munge_auth::Message = payload.unwrap();
             info!("Login request: {:?}", payload);
             let uid = payload.uid;
             let payload = serde_json::from_str(&payload.msg);
             if let Err(_) = payload {
-                return Err((StatusCode::BAD_REQUEST, "Unable to deserialize request".to_string()));
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "Unable to deserialize request".to_string(),
+                ));
             }
             let payload: UserLogin = payload.unwrap();
             info!("Login request: {:?}", payload);
@@ -146,7 +166,7 @@ pub async fn login_handler(
                 info!("bad timestamp");
                 Err((StatusCode::BAD_REQUEST, "bad timestamp".to_string()))
             } else {
-                let key = EncodingKey::from_base64_secret(SKETCHY_SECRET).unwrap();
+                let key = EncodingKey::from_base64_secret(&SECRET).unwrap();
                 let claims = RoleGuard::new(
                     role,
                     payload.user,
@@ -155,7 +175,7 @@ pub async fn login_handler(
                 let token = encode(&Header::default(), &claims, &key).unwrap();
                 Ok(axum::Json(Token { token }))
             }
-        },
+        }
     }
 }
 
