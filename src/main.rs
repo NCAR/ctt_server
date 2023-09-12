@@ -94,14 +94,13 @@ async fn main() {
                 .timeout(Duration::from_secs(10)),
         );
 
-    info!("GraphiQL IDE: http://localhost:8000");
+    info!("GraphiQL IDE: https://localhost:8000");
 
     // run https server
     let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
     axum_server::bind_rustls(addr, config)
         .handle(handle)
         .serve(app.into_make_service())
-        //  .with_graceful_shutdown(async { signal::ctrl_c().await.unwrap() })
         .await
         .unwrap();
 }

@@ -60,6 +60,7 @@ impl NewIssue {
                 let _ = kwargs.set_item("created_by", created_by);
                 let _ = kwargs.set_item("title", title);
                 let _ = kwargs.set_item("description", description);
+                let _ = kwargs.set_item("severity", 3);
                 if let Some(e) = enforce_down {
                     let _ = kwargs.set_item("enforce_down", e);
                 } else {
