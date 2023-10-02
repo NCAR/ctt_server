@@ -2,6 +2,7 @@ use super::query;
 use super::Issue;
 use crate::auth::{Role, RoleChecker, RoleGuard};
 use async_graphql::{Context, InputObject, Object, Result};
+use tokio::sync::mpsc;
 use pyo3::types::{PyDict, PyModule};
 use pyo3::{PyErr, Python};
 
@@ -127,19 +128,22 @@ impl Mutation {
     async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Issue {
         //TODO get operator from authentication
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
+        let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
+        let _ = tx.send(format!("{}: Opening issue for {}: {}", usr, issue.target, issue.title)).await;
         query::issue_from_id(ctx, issue.open(usr).await)
             .await
             .unwrap()
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn close<'a>(&self, issue: u32, comment: String) -> String {
-        //TODO get operator from authentication
-        issue_close(issue, "todo".to_string(), comment).await;
+    async fn close<'a>(&self, ctx: &Context<'a>, issue: u32, comment: String) -> String {
+        let usr: String = ctx.data_opt::<RoleGuard>().unwrap().user.clone();
+        let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
+        let _ = tx.send(format!("{}: closing issue for {}: {}", usr, issue, comment)).await;
+        issue_close(issue, usr, comment).await;
         "Closed".to_string()
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn update<'a>(&self, ctx: &Context<'a>, issue: UpdateIssue) -> Issue {
-        //TODO get operator from authentication
         tokio::task::spawn_blocking(move || {
             pyo3::prepare_freethreaded_python();
             Python::with_gil(|py| -> Result<(), PyErr> {
@@ -183,7 +187,10 @@ impl Mutation {
         query::issue_from_id(ctx, issue.id).await.unwrap()
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn drain(&self, issue: u32) -> String {
+    async fn drain<'a>(&self, ctx: &Context<'a>, issue: u32) -> String {
+        let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
+        let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
+        let _ = tx.send(format!("{}: draing nodes for issue {}", usr, issue)).await;
         tokio::task::spawn_blocking(move || {
             pyo3::prepare_freethreaded_python();
             Python::with_gil(|py| -> Result<(), PyErr> {
@@ -214,7 +221,10 @@ impl Mutation {
         "drained".to_string()
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn release(&self, issue: u32) -> String {
+    async fn release<'a>(&self, ctx: &Context<'a>, issue: u32) -> String {
+        let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
+        let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
+        let _ = tx.send(format!("{}: resuming nodes for issue {}", usr, issue)).await;
         tokio::task::spawn_blocking(move || {
             pyo3::prepare_freethreaded_python();
             Python::with_gil(|py| -> Result<(), PyErr> {

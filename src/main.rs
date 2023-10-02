@@ -1,4 +1,6 @@
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
+use std::env;
+use tracing::warn;
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
 use axum::{
     error_handling::HandleErrorLayer,
@@ -11,10 +13,12 @@ use axum::{
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use http::StatusCode;
+use slack_morphism::{prelude::SlackClientHyperConnector, SlackClient, SlackApiTokenValue, SlackApiToken, prelude::SlackApiChatPostMessageRequest, SlackMessageContent};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::signal;
+use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tower::ServiceBuilder;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
@@ -28,11 +32,39 @@ async fn graphql_handler(
     Extension(role): Extension<auth::RoleGuard>,
     req: GraphQLRequest,
 ) -> GraphQLResponse {
+    let (tx, rx) = mpsc::channel(5);
+    tokio::spawn(slack_updater(rx));
     let mut req = req.into_inner();
     req = req.data(role);
+    req = req.data(tx);
     let resp = schema.execute(req).await;
     info!("{:?}", &resp);
     resp.into()
+}
+
+async fn slack_updater(mut rx: mpsc::Receiver<String>) {
+    let connector = SlackClientHyperConnector::new();
+    let client = SlackClient::new(connector);
+    let token_value: SlackApiTokenValue = env::var("SLACK_TOKEN").expect("Missing SLACK_TOKEN").into();
+    let token: SlackApiToken = SlackApiToken::new(token_value);
+    let mut updates = vec![];
+    while let Some(u) = rx.recv().await {
+        updates.push(u);
+    }
+    if updates.len() == 0 {
+        return;
+    }
+    let session = client.open_session(&token);
+
+    // Send a simple text messagele
+    let post_chat_req = SlackApiChatPostMessageRequest::new(
+        "#shanks-test".into(),
+        SlackMessageContent::new().with_text(format!("{:?}", updates).into()),
+    );
+
+    if let Err(e) = session.chat_post_message(&post_chat_req).await {
+        warn!("error sending slack message {}", e);
+    };
 }
 
 async fn graphiql() -> impl IntoResponse {

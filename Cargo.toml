@@ -29,3 +29,4 @@ munge_auth = "0.1"
 axum-server = { version = "0.5", features = ["tls-rustls"] }
 lazy_static = "1"
 rand = "0.8"
+slack-morphism = { version = "1", features = ["axum"] }
