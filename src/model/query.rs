@@ -8,17 +8,17 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Enum, Copy, Clone, Eq, PartialEq)]
 pub enum NodeStatus {
-    ONLINE,
-    DRAINING,
-    DRAINED,
-    OFFLINE,
-    UNKNOWN,
+    Online,
+    Draining,
+    Drained,
+    Offline,
+    Unknown,
 }
 
 #[derive(Serialize, Deserialize, Enum, Copy, Clone, Eq, PartialEq)]
 pub enum IssueStatus {
-    OPEN,
-    CLOSED,
+    Open,
+    Closed,
 }
 
 #[derive(Serialize, Deserialize, Clone, SimpleObject)]
@@ -31,7 +31,7 @@ pub struct Comment {
 #[ComplexObject]
 impl Issue {
     async fn comments(&self) -> Vec<Comment> {
-        let id = self.id.clone();
+        let id = self.id;
         tokio::task::spawn_blocking(move || {
             pyo3::prepare_freethreaded_python();
             Python::with_gil(|py| -> Result<Vec<Comment>, PyErr> {
@@ -102,16 +102,16 @@ nks/projects/ctt/conf/secrets.ini",
                 .unwrap();
             let issue = ctt.call_method1("issue", (id,)).unwrap();
             let issue_status = {
-                if issue.getattr("status").unwrap().to_string() == "OPEN" {
-                    IssueStatus::OPEN
+                if issue.getattr("status").unwrap().to_string() == "Open" {
+                    IssueStatus::Open
                 } else {
-                    IssueStatus::CLOSED
+                    IssueStatus::Closed
                 }
             };
             Ok(Issue {
                 id: issue.getattr("id").unwrap().extract().unwrap(),
                 target: issue.getattr("target").unwrap().to_string(),
-                issue_status: issue_status,
+                issue_status,
                 assigned_to: issue.getattr("assigned_to").unwrap().to_string(),
                 title: issue.getattr("title").unwrap().to_string(),
                 description: issue.getattr("description").unwrap().to_string(),
@@ -151,16 +151,16 @@ nks/projects/ctt/conf/secrets.ini",
             for i in issues.iter().unwrap() {
                 let issue = i.unwrap();
                 let issue_status = {
-                    if issue.getattr("status").unwrap().to_string() == "IssueStatus.OPEN" {
-                        IssueStatus::OPEN
+                    if issue.getattr("status").unwrap().to_string() == "IssueStatus.Open" {
+                        IssueStatus::Open
                     } else {
-                        IssueStatus::CLOSED
+                        IssueStatus::Closed
                     }
                 };
                 resp.push(Issue {
                     id: issue.getattr("id").unwrap().extract().unwrap(),
                     target: issue.getattr("target").unwrap().to_string(),
-                    issue_status: issue_status,
+                    issue_status,
                     assigned_to: issue.getattr("assigned_to").unwrap().to_string(),
                     title: issue.getattr("title").unwrap().to_string(),
                     description: issue.getattr("description").unwrap().to_string(),
@@ -193,13 +193,10 @@ impl Query {
     ) -> Vec<Issue> {
         let mut issues = issues(ctx).await.unwrap();
         if let Some(status) = issue_status {
-            issues = issues
-                .into_iter()
-                .filter(|x| x.issue_status == status)
-                .collect()
+            issues.retain(|x| x.issue_status == status)
         }
         if let Some(t) = target {
-            issues = issues.into_iter().filter(|x| x.target == t).collect()
+            issues.retain(|x| x.target == t)
         }
         issues
     }

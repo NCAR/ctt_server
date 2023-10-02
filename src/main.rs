@@ -51,7 +51,7 @@ async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     while let Some(u) = rx.recv().await {
         updates.push(u);
     }
-    if updates.len() == 0 {
+    if updates.is_empty() {
         return;
     }
     let session = client.open_session(&token);
@@ -59,7 +59,7 @@ async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     // Send a simple text messagele
     let post_chat_req = SlackApiChatPostMessageRequest::new(
         "#shanks-test".into(),
-        SlackMessageContent::new().with_text(format!("{:?}", updates).into()),
+        SlackMessageContent::new().with_text(format!("{:?}", updates)),
     );
 
     if let Err(e) = session.chat_post_message(&post_chat_req).await {

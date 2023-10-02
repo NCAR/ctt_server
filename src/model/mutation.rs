@@ -30,8 +30,8 @@ impl NewIssue {
         let assigned_to = self.assigned_to.clone();
         let title = self.title.clone();
         let description = self.description.clone();
-        let enforce_down = self.enforce_down.clone();
-        let down_siblings = self.down_siblings.clone();
+        let enforce_down = self.enforce_down;
+        let down_siblings = self.down_siblings;
         let created_by = operator.to_string();
         tokio::task::spawn_blocking(move || {
             pyo3::prepare_freethreaded_python();

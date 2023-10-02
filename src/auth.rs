@@ -11,16 +11,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tower_http::validate_request::ValidateRequest;
 use tracing::{debug, info};
-use users;
+
 
 lazy_static! {
     static ref SECRET: String = {
-        let s = rand::thread_rng()
+        
+        rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(64)
             .map(char::from)
-            .collect::<String>();
-        s
+            .collect::<String>()
     };
 }
 
@@ -34,7 +34,7 @@ impl<B> ValidateRequest<B> for Auth {
         &mut self,
         request: &mut axum::http::Request<B>,
     ) -> axum::response::Result<(), axum::response::Response> {
-        if let Some(user) = check_auth(&request) {
+        if let Some(user) = check_auth(request) {
             // Set `user_id` as a request extension so it can be accessed by other
             // services down the stack.
             info!("Request validated for user {}", &user.user);
@@ -61,23 +61,13 @@ fn check_auth<B>(request: &axum::http::Request<B>) -> Option<RoleGuard> {
         .get(header::AUTHORIZATION)
         .and_then(|auth_header| auth_header.to_str().ok())
         .and_then(|auth_value| {
-            if auth_value.starts_with("Bearer ") {
-                Some(auth_value[7..].to_owned())
-            } else {
-                None
-            }
-        })
-        .and_then(|t| {
-            Some(
-                decode::<RoleGuard>(
+            auth_value.strip_prefix("Bearer ").map(|stripped| stripped.to_owned())
+        }).map(|t| decode::<RoleGuard>(
                     &t,
                     &DecodingKey::from_base64_secret(&SECRET).unwrap(),
                     &Validation::new(Algorithm::HS256),
                 )
-                .unwrap(),
-            )
-        })
-        .and_then(|c| Some(c.claims))
+                .unwrap()).map(|c| c.claims)
 }
 
 #[derive(Deserialize, Debug)]
@@ -136,7 +126,7 @@ pub async fn login_handler(
     match raw_payload {
         AuthRequest::Munge(payload) => {
             let payload = munge_auth::unmunge(payload);
-            if let Err(_) = payload {
+            if payload.is_err() {
                 return Err((
                     StatusCode::BAD_REQUEST,
                     "Unable to deserialize request".to_string(),
@@ -146,7 +136,7 @@ pub async fn login_handler(
             info!("Login request: {:?}", payload);
             let uid = payload.uid;
             let payload = serde_json::from_str(&payload.msg);
-            if let Err(_) = payload {
+            if payload.is_err() {
                 return Err((
                     StatusCode::BAD_REQUEST,
                     "Unable to deserialize request".to_string(),
