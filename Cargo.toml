@@ -30,3 +30,6 @@ axum-server = { version = "0.5", features = ["tls-rustls"] }
 lazy_static = "1"
 rand = "0.8"
 slack-morphism = { version = "1", features = ["axum"] }
+sea-orm = { version="0.12", features = ["with-chrono", "sqlx-sqlite", "runtime-tokio-rustls", "macros"]}
+sea-orm-migration = "0.12"
+

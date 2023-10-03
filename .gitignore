@@ -2,3 +2,4 @@
 /venv
 /certs
 env.sh
+db.sqlite

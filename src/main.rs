@@ -1,3 +1,7 @@
+mod setup;
+mod migrator;
+mod entities;
+use setup::setup_and_connect;
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
 use std::env;
 use tracing::warn;
@@ -86,11 +90,15 @@ async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (St
 #[tokio::main]
 async fn main() {
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::DEBUG)
+        .with_max_level(Level::INFO)
         .finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    let db = setup_and_connect().await.unwrap();
+
     let schema = Schema::build(model::Query, model::Mutation, EmptySubscription)
         .extension(Tracing)
+        .data(db)
         .finish();
 
     // configure certificate and private key used by https
@@ -126,7 +134,7 @@ async fn main() {
                 .timeout(Duration::from_secs(10)),
         );
 
-    info!("GraphiQL IDE: https://localhost:8000");
+    //info!("GraphiQL IDE: https://localhost:8000");
 
     // run https server
     let addr = SocketAddr::from(([127, 0, 0, 1], 8000));

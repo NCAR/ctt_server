@@ -97,7 +97,7 @@ async fn check_role(usr: &str, uid: u32) -> Option<Role> {
         .filter_map(|x| x.ok())
         .collect();
     println!("{:?}", &groups);
-    let admin = vec!["rdoot", "dhsg"];
+    let admin = vec!["shanks", "dhsg"];
     let guest = vec!["shanks"];
     for g in admin {
         if groups.contains(g) {

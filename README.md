@@ -1,6 +1,9 @@
 # ctt server
 GraphQL api server for CTT
 
+## Dev setup
+- generate a cert with `openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 3650 -nodes -subj "/C=XX/ST=StateName/L=CityName/O=CompanyName/OU=CompanySectionName/CN=127.0.0.1"`
+- client needs cert
 
 ## querys
 - list issues

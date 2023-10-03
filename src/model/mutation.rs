@@ -1,5 +1,4 @@
-use super::query;
-use super::Issue;
+use sea_orm::DatabaseConnection;
 use crate::auth::{Role, RoleChecker, RoleGuard};
 use async_graphql::{Context, InputObject, Object, Result};
 use tokio::sync::mpsc;
@@ -124,16 +123,17 @@ pub struct Mutation;
 
 #[Object]
 impl Mutation {
+    
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Issue {
+    async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Option<crate::entities::issue::Model> {
+        let db = ctx.data::<DatabaseConnection>().unwrap();
         //TODO get operator from authentication
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
         let _ = tx.send(format!("{}: Opening issue for {}: {}", usr, issue.target, issue.title)).await;
-        query::issue_from_id(ctx, issue.open(usr).await)
-            .await
-            .unwrap()
+        crate::entities::prelude::Issue::find_by_id(issue.open(usr).await.try_into().unwrap()).one(db).await.unwrap()
     }
+    /*
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn close<'a>(&self, ctx: &Context<'a>, issue: u32, comment: String) -> String {
         let usr: String = ctx.data_opt::<RoleGuard>().unwrap().user.clone();
@@ -254,4 +254,5 @@ impl Mutation {
         .unwrap();
         "released".to_string()
     }
+    */
 }
