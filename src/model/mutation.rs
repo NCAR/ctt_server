@@ -60,11 +60,11 @@ impl UpdateIssue {
             };
             c.insert(db).await.unwrap();
         }
-        if let Some(_) = self.to_offline && self.to_offline != issue.to_offline {
-            updated_issue.to_offline = ActiveValue::Set(self.to_offline);
+        if let Some(o) = self.to_offline && o != issue.to_offline {
+            updated_issue.to_offline = ActiveValue::Set(o);
             let c = comment::ActiveModel {
                 created_by: ActiveValue::Set(operator.to_string()),
-                comment: ActiveValue::Set(format!("Updating to_offline from {:?} to {:?}", issue.to_offline, self.to_offline)),
+                comment: ActiveValue::Set(format!("Updating to_offline from {:?} to {:?}", issue.to_offline, o)),
                 issue_id: ActiveValue::Set(issue.id),
                 ..Default::default()
             };
@@ -158,7 +158,7 @@ impl NewIssue {
             assigned_to: ActiveValue::Set(self.assigned_to.clone()),
             created_by: ActiveValue::Set(operator.to_string()),
             description: ActiveValue::Set(self.description.clone()),
-            to_offline: ActiveValue::Set(self.to_offline),
+            to_offline: ActiveValue::Set(self.to_offline.unwrap_or(issue::ToOffline::Target)),
             enforce_down: ActiveValue::Set(self.enforce_down.unwrap_or(false)),
             issue_status: ActiveValue::Set(IssueStatus::Open),
             target_id: ActiveValue::Set(target_id),

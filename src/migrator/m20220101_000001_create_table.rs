@@ -74,6 +74,7 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(Issue::ToOffline)
                             .enumeration(ToOffline::Table, ToOffline::iter().skip(1))
+                            .not_null()
                     )
                     .col(
                         ColumnDef::new(Issue::AssignedTo)

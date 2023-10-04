@@ -13,7 +13,7 @@ pub struct Model {
     pub created_at: chrono::NaiveDateTime,
     pub created_by: String,
     pub description: String,
-    pub to_offline: Option<ToOffline>,
+    pub to_offline: ToOffline,
     pub enforce_down: bool,
     #[sea_orm(primary_key, auto_increment = true)]
     pub id: i32,
