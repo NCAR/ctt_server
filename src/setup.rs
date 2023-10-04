@@ -38,7 +38,11 @@ pub async fn setup_and_connect() -> Result<DatabaseConnection, DbErr> {
     
     let schema_manager = SchemaManager::new(&db);
 
-    Migrator::refresh(&db).await?;
+    if !schema_manager.has_table("issue").await? ||
+        !schema_manager.has_table("comment").await? ||
+        !schema_manager.has_table("target").await? {
+        Migrator::refresh(&db).await?;
+    }
     assert!(schema_manager.has_table("issue").await?);
     assert!(schema_manager.has_table("comment").await?);
 

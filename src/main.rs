@@ -4,7 +4,6 @@ mod entities;
 use setup::setup_and_connect;
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
 use std::env;
-use tracing::warn;
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
 use axum::{
     error_handling::HandleErrorLayer,
@@ -17,6 +16,7 @@ use axum::{
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use http::StatusCode;
+#[cfg(feature="slack")]
 use slack_morphism::{prelude::SlackClientHyperConnector, SlackClient, SlackApiTokenValue, SlackApiToken, prelude::SlackApiChatPostMessageRequest, SlackMessageContent};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -26,7 +26,8 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tower::ServiceBuilder;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
-use tracing::{info, Level};
+#[allow(unused_imports)]
+use tracing::{warn, info, Level};
 use tracing_subscriber::FmtSubscriber;
 mod auth;
 mod model;
@@ -46,6 +47,21 @@ async fn graphql_handler(
     resp.into()
 }
 
+#[cfg(not(feature="slack"))]
+async fn slack_updater(mut rx: mpsc::Receiver<String>) {
+    let mut updates = vec![];
+    while let Some(u) = rx.recv().await {
+        updates.push(u);
+    }
+    if updates.is_empty() {
+        return;
+    }
+    for m in updates {
+        info!(m);
+    }
+}
+
+#[cfg(feature="slack")]
 async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     let connector = SlackClientHyperConnector::new();
     let client = SlackClient::new(connector);
@@ -90,7 +106,6 @@ async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (St
 #[tokio::main]
 async fn main() {
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
         .finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
 

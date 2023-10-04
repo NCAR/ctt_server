@@ -4,4 +4,4 @@ pub mod prelude;
 
 pub mod comment;
 pub mod issue;
-pub mod use target;
+pub mod target;

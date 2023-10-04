@@ -29,7 +29,11 @@ munge_auth = "0.1"
 axum-server = { version = "0.5", features = ["tls-rustls"] }
 lazy_static = "1"
 rand = "0.8"
-slack-morphism = { version = "1", features = ["axum"] }
+slack-morphism = { version = "1", features = ["axum"], optional = true}
 sea-orm = { version="0.12", features = ["with-chrono", "sqlx-sqlite", "runtime-tokio-rustls", "macros"]}
 sea-orm-migration = "0.12"
+pbs = { path="../pbs", optional = true }
 
+[features]
+default = ["pbs", "slack"]
+slack = ["slack-morphism"]

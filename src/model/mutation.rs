@@ -1,9 +1,15 @@
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseConnection, ActiveModelTrait};
+use sea_orm::entity::ActiveValue;
 use crate::auth::{Role, RoleChecker, RoleGuard};
 use async_graphql::{Context, InputObject, Object, Result};
 use tokio::sync::mpsc;
-use pyo3::types::{PyDict, PyModule};
-use pyo3::{PyErr, Python};
+#[cfg(feature="pbs")]
+use pbs::Server;
+use crate::entities::issue::{self, IssueStatus};
+use crate::entities::comment;
+use crate::entities::prelude::*;
+use crate::entities::target::{self, TargetStatus};
+use tracing::log::warn;
 
 #[derive(InputObject)]
 pub struct UpdateIssue {
@@ -13,110 +19,127 @@ pub struct UpdateIssue {
     id: u32,
     title: Option<String>,
 }
+
 #[derive(InputObject)]
 pub struct NewIssue {
     assigned_to: Option<String>,
     description: String,
-    down_siblings: Option<bool>,
+    to_offline: Option<issue::ToOffline>,
     enforce_down: Option<bool>,
     target: String,
     title: String,
 }
 
+async fn create_target(target: &str, db: &DatabaseConnection) -> target::Model {
+        let new_target = target::ActiveModel{
+            name: ActiveValue::Set(target.to_string()),
+            status: ActiveValue::Set(target::TargetStatus::Online),
+            ..Default::default()
+        };
+        new_target.insert(db).await.unwrap()
+}
+
 impl NewIssue {
-    async fn open(&self, operator: &str) -> u32 {
-        let target = self.target.clone();
-        let assigned_to = self.assigned_to.clone();
-        let title = self.title.clone();
-        let description = self.description.clone();
-        let enforce_down = self.enforce_down;
-        let down_siblings = self.down_siblings;
-        let created_by = operator.to_string();
-        tokio::task::spawn_blocking(move || {
-            pyo3::prepare_freethreaded_python();
-            Python::with_gil(|py| -> Result<u32, PyErr> {
-                let ctt_module = PyModule::import(py, "ctt").unwrap();
-                let conf = ctt_module
-                    .getattr("get_config")
-                    .unwrap()
-                    .call(
-                        (
-                            "/home/shanks/projects/ctt/conf/ctt.ini",
-                            "/home/shanks/projects/ctt/conf/secrets.ini",
-                        ),
-                        None,
-                    )
-                    .unwrap();
-                let ctt = ctt_module
-                    .getattr("CTT")
-                    .unwrap()
-                    .call((conf,), None)
-                    .unwrap();
-                let kwargs = PyDict::new(py);
-                let _ = kwargs.set_item("target", target);
-                if let Some(a) = assigned_to {
-                    let _ = kwargs.set_item("assigned_to", a);
-                }
-                let _ = kwargs.set_item("created_by", created_by);
-                let _ = kwargs.set_item("title", title);
-                let _ = kwargs.set_item("description", description);
-                let _ = kwargs.set_item("severity", 3);
-                if let Some(e) = enforce_down {
-                    let _ = kwargs.set_item("enforce_down", e);
-                } else {
-                    let _ = kwargs.set_item("enforce_down", false);
-                }
-                if let Some(d) = down_siblings {
-                    let _ = kwargs.set_item("down_siblings", d);
-                } else {
-                    let _ = kwargs.set_item("down_siblings", false);
-                }
-                let issue = ctt_module
-                    .getattr("Issue")
-                    .unwrap()
-                    .call((), Some(kwargs))
-                    .unwrap();
-                let id = ctt.call_method1("open", (issue,)).unwrap();
-                Ok(id.extract().unwrap())
-            })
-            .unwrap()
-        })
-        .await
-        .unwrap()
+    async fn open(&self, operator: &str, db: &DatabaseConnection) -> Result<issue::Model, String> {
+        if let Some(i) = Issue::already_open(&self.target, &self.title, db).await {
+            return Ok(i)
+        }
+        let target = Target::find_by_name(&self.target).one(db).await.unwrap();
+        let target = if target.is_none() {
+            warn!("Target not found, creating {}", self.target);
+            create_target(&self.target, db).await
+        } else {
+            let t = target.unwrap();
+            warn!("Target exists, with id {}", t.id);
+            t
+        };
+        let target_id = target.id;
+        #[cfg(feature="pbs")]
+        let srv = Server::new();
+        // TODO only set offline if not already offline
+        //let status = srv.stat_host(&None, None);
+        let off: Result<(), String> = match self.to_offline {
+            None => {
+                #[cfg(feature="pbs")]
+                srv.offline_vnode(&self.target, Some(&self.title))?;
+                //TODO set target to draining
+                let mut target: target::ActiveModel = target.into();
+                target.status = ActiveValue::Set(TargetStatus::Draining);
+                target.update(db).await.unwrap();
+                Ok(())
+            },
+            Some(issue::ToOffline::Cousins) => {
+                todo!()
+                //srv.offline(cluster.blade(self.target), format!("{} sibling", self.target));
+                //srv.offline(vec!(self.target), &self.title);
+            },
+            Some(issue::ToOffline::Siblings) => {
+                todo!()
+                //srv.offline(cluster.card(self.target), format!("{} sibling", self.target));
+                //srv.offline(vec!(self.target), &self.title);
+            },
+            Some(issue::ToOffline::Target) => {
+                #[cfg(feature="pbs")]
+                srv.offline_vnode(&self.target, Some(&self.title))?;
+                //TODO set target to draining
+                let mut target: target::ActiveModel = target.into();
+                target.status = ActiveValue::Set(TargetStatus::Draining);
+                target.update(db).await.unwrap();
+                Ok(())
+            },
+        };
+        off.unwrap();
+        let new_issue = issue::ActiveModel{
+            assigned_to: ActiveValue::Set(self.assigned_to.clone()),
+            created_by: ActiveValue::Set(operator.to_string()),
+            description: ActiveValue::Set(self.description.clone()),
+            to_offline: ActiveValue::Set(self.to_offline),
+            enforce_down: ActiveValue::Set(self.enforce_down.unwrap_or(false)),
+            issue_status: ActiveValue::Set(IssueStatus::Open),
+            //TODO insert target if not exists
+            target_id: ActiveValue::Set(target_id),
+            title: ActiveValue::Set(self.title.clone()),
+            ..Default::default()
+        };
+        let new_issue = new_issue.insert(db).await.unwrap();
+        let c = comment::ActiveModel {
+            created_by: ActiveValue::Set(operator.to_string()),
+            comment: ActiveValue::Set("Opening issue".to_string()),
+            issue_id: ActiveValue::Set(new_issue.id),
+            ..Default::default()
+        };
+        c.insert(db).await.unwrap();
+        Ok(new_issue)
     }
 }
 
-async fn issue_close(cttissue: u32, operator: String, comment: String) {
-    tokio::task::spawn_blocking(move || {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| -> Result<(), PyErr> {
-            let ctt_module = PyModule::import(py, "ctt").unwrap();
-            let conf = ctt_module
-                .getattr("get_config")
-                .unwrap()
-                .call(
-                    (
-                        "/home/shanks/projects/ctt/conf/ctt.ini",
-                        "/home/s
-nks/projects/ctt/conf/secrets.ini",
-                    ),
-                    None,
-                )
-                .unwrap();
-            let ctt = ctt_module
-                .getattr("CTT")
-                .unwrap()
-                .call((conf,), None)
-                .unwrap();
-            let issue = ctt.call_method1("issue", (cttissue,)).unwrap();
-            ctt.call_method1("close", (issue, operator, comment))
-                .unwrap();
-            Ok(())
-        })
-        .unwrap()
-    })
-    .await
-    .unwrap()
+async fn issue_close(cttissue: i32, operator: String, comment: String, db: &DatabaseConnection) -> Result<String, String> {
+    let issue = Issue::find_by_id(cttissue).one(db).await.unwrap().unwrap();
+    let target_id = issue.target_id;
+    if issue.issue_status == IssueStatus::Open {
+        let mut issue: issue::ActiveModel = issue.into();
+        issue.issue_status = ActiveValue::Set(IssueStatus::Closed);
+        issue.reset(issue::Column::IssueStatus);
+        issue.update(db).await.unwrap();
+        let c = comment::ActiveModel {
+            created_by: ActiveValue::Set(operator.clone()),
+            comment: ActiveValue::Set(comment.clone()),
+            issue_id: ActiveValue::Set(target_id),
+            ..Default::default()
+        };
+        c.insert(db).await.unwrap();
+        #[allow(unused_variables)]
+        let target = Target::find_by_id(target_id).one(db).await.unwrap().unwrap();
+        #[cfg(feature="pbs")]
+        let srv = Server::new();
+        #[cfg(feature="pbs")]
+        srv.clear_vnode(&target.name, Some(""))?;
+        //TODO check if there are any other issues on target, or siblings with correct to_offline flag before resuming
+        let mut target: target::ActiveModel = target.into();
+        target.status = ActiveValue::Set(TargetStatus::Online);
+        target.update(db).await.unwrap();
+    }
+    Ok(format!("closed {}", cttissue))
 }
 
 pub struct Mutation;
@@ -125,134 +148,40 @@ pub struct Mutation;
 impl Mutation {
     
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Option<crate::entities::issue::Model> {
+    async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Result<issue::Model, String> {
         let db = ctx.data::<DatabaseConnection>().unwrap();
         //TODO get operator from authentication
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
         let _ = tx.send(format!("{}: Opening issue for {}: {}", usr, issue.target, issue.title)).await;
-        crate::entities::prelude::Issue::find_by_id(issue.open(usr).await.try_into().unwrap()).one(db).await.unwrap()
+        issue.open(usr, &db).await
     }
-    /*
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn close<'a>(&self, ctx: &Context<'a>, issue: u32, comment: String) -> String {
+    async fn close<'a>(&self, ctx: &Context<'a>, issue: i32, comment: String) -> Result<String, String> {
         let usr: String = ctx.data_opt::<RoleGuard>().unwrap().user.clone();
         let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
         let _ = tx.send(format!("{}: closing issue for {}: {}", usr, issue, comment)).await;
-        issue_close(issue, usr, comment).await;
-        "Closed".to_string()
+        let db = ctx.data::<DatabaseConnection>().unwrap();
+        issue_close(issue, usr, comment, &db).await
     }
+    /*
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn update<'a>(&self, ctx: &Context<'a>, issue: UpdateIssue) -> Issue {
-        tokio::task::spawn_blocking(move || {
-            pyo3::prepare_freethreaded_python();
-            Python::with_gil(|py| -> Result<(), PyErr> {
-                let ctt_module = PyModule::import(py, "ctt").unwrap();
-                let conf = ctt_module
-                    .getattr("get_config")
-                    .unwrap()
-                    .call(
-                        (
-                            "/home/shanks/projects/ctt/conf/ctt.ini",
-                            "/home/shanks/projects/ctt/conf/secrets.ini",
-                        ),
-                        None,
-                    )
-                    .unwrap();
-                let ctt = ctt_module
-                    .getattr("CTT")
-                    .unwrap()
-                    .call((conf,), None)
-                    .unwrap();
-                let kwargs = PyDict::new(py);
-                if let Some(a) = issue.assigned_to {
-                    let _ = kwargs.set_item("assigned_to", a);
-                }
-                if let Some(a) = issue.description {
-                    let _ = kwargs.set_item("description", a);
-                }
-                if let Some(a) = issue.enforce_down {
-                    let _ = kwargs.set_item("enforce_down", a);
-                }
-                if let Some(a) = issue.title {
-                    let _ = kwargs.set_item("title", a);
-                }
-                ctt.call_method("update", (issue.id, kwargs), None).unwrap();
-                Ok(())
-            })
-            .unwrap()
-        })
-        .await
-        .unwrap();
-        query::issue_from_id(ctx, issue.id).await.unwrap()
+    async fn update<'a>(&self, ctx: &Context<'a>, issue: UpdateIssue) -> issue::Model {
+        todo!()
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn drain<'a>(&self, ctx: &Context<'a>, issue: u32) -> String {
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
         let _ = tx.send(format!("{}: draing nodes for issue {}", usr, issue)).await;
-        tokio::task::spawn_blocking(move || {
-            pyo3::prepare_freethreaded_python();
-            Python::with_gil(|py| -> Result<(), PyErr> {
-                let ctt_module = PyModule::import(py, "ctt").unwrap();
-                let conf = ctt_module
-                    .getattr("get_config")
-                    .unwrap()
-                    .call(
-                        (
-                            "/home/shanks/projects/ctt/conf/ctt.ini",
-                            "/home/shanks/projects/ctt/conf/secrets.ini",
-                        ),
-                        None,
-                    )
-                    .unwrap();
-                let ctt = ctt_module
-                    .getattr("CTT")
-                    .unwrap()
-                    .call((conf,), None)
-                    .unwrap();
-                ctt.call_method1("prep_for_work", (issue, "todo")).unwrap();
-                Ok(())
-            })
-            .unwrap()
-        })
-        .await
-        .unwrap();
-        "drained".to_string()
+        todo!()
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn release<'a>(&self, ctx: &Context<'a>, issue: u32) -> String {
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
         let _ = tx.send(format!("{}: resuming nodes for issue {}", usr, issue)).await;
-        tokio::task::spawn_blocking(move || {
-            pyo3::prepare_freethreaded_python();
-            Python::with_gil(|py| -> Result<(), PyErr> {
-                let ctt_module = PyModule::import(py, "ctt").unwrap();
-                let conf = ctt_module
-                    .getattr("get_config")
-                    .unwrap()
-                    .call(
-                        (
-                            "/home/shanks/projects/ctt/conf/ctt.ini",
-                            "/home/shanks/projects/ctt/conf/secrets.ini",
-                        ),
-                        None,
-                    )
-                    .unwrap();
-                let ctt = ctt_module
-                    .getattr("CTT")
-                    .unwrap()
-                    .call((conf,), None)
-                    .unwrap();
-                ctt.call_method1("end_work", (issue, "todo")).unwrap();
-                Ok(())
-            })
-            .unwrap()
-        })
-        .await
-        .unwrap();
-        "released".to_string()
+        todo!()
     }
     */
 }

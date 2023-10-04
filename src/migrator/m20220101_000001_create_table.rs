@@ -23,6 +23,7 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(Target::Name)
                             .string()
+                            .unique_key()
                             .not_null()
                     )
                     .col(
@@ -71,9 +72,8 @@ impl MigrationTrait for Migration {
                             .not_null()
                     )
                     .col(
-                        ColumnDef::new(Issue::DownSiblings)
-                            .boolean()
-                            .not_null()
+                        ColumnDef::new(Issue::ToOffline)
+                            .enumeration(ToOffline::Table, ToOffline::iter().skip(1))
                     )
                     .col(
                         ColumnDef::new(Issue::AssignedTo)
@@ -166,7 +166,7 @@ enum Issue {
     Description,
     IssueStatus,
     TargetId,
-    DownSiblings,
+    ToOffline,
     AssignedTo,
     CreatedBy,
     CreatedAt,
@@ -196,6 +196,14 @@ enum IssueStatus {
     Table,
     Open,
     Closed,
+}
+
+#[derive(Iden, EnumIter)]
+enum ToOffline{
+    Table,
+    Target,
+    Siblings,
+    Cousins,
 }
 
 #[derive(Iden, EnumIter)]

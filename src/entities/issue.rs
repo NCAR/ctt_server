@@ -3,20 +3,22 @@
 use async_graphql::*;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use super::prelude::Target;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, SimpleObject)]
 #[sea_orm(table_name = "issue")]
-#[graphql(concrete(name = "Issue", params()))]
+#[graphql(concrete(name = "Issue", params()), complex)]
 pub struct Model {
     pub assigned_to: Option<String>,
-    pub created_at: String,
+    pub created_at: chrono::NaiveDateTime,
     pub created_by: String,
     pub description: String,
-    pub down_siblings: bool,
+    pub to_offline: Option<ToOffline>,
     pub enforce_down: bool,
-    #[sea_orm(primary_key)]
+    #[sea_orm(primary_key, auto_increment = true)]
     pub id: i32,
     pub issue_status: IssueStatus,
+    #[graphql(skip)]
     pub target_id: i32,
     pub title: String,
 }
@@ -53,6 +55,18 @@ impl Entity {
     pub fn find_by_id(id: i32) -> Select<Entity> {
         Self::find().filter(Column::Id.eq(id))
     }
+    pub async fn already_open(target: &str, title: &str, db: &DatabaseConnection) -> Option<Model> {
+        let target = Target::find_by_name(target).one(db).await.unwrap();
+        if target.is_none() {
+            return None;
+        }
+        let target = target.unwrap();
+        Self::find()
+            .filter(Column::IssueStatus.eq(IssueStatus::Open))
+            .filter(Column::Title.eq(title))
+            .filter(Column::TargetId.eq(target.id))
+            .one(db).await.unwrap()
+    }
 }
 
 #[derive(Copy, Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, async_graphql::Enum, Serialize, Deserialize)]
@@ -62,5 +76,16 @@ pub enum IssueStatus {
     Open,
     #[sea_orm(string_value = "Closed")]
     Closed,
+}
+
+#[derive(Copy, Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, async_graphql::Enum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "to_offline")]
+pub enum ToOffline {
+    #[sea_orm(string_value = "Node")]
+    Target,
+    #[sea_orm(string_value = "Sibling")]
+    Siblings,
+    #[sea_orm(string_value = "Cousin")]
+    Cousins,
 }
 

@@ -767,6 +767,7 @@ dependencies = [
  "jsonwebtoken",
  "lazy_static",
  "munge_auth",
+ "pbs",
  "pyo3",
  "rand",
  "sea-orm",
@@ -1543,6 +1544,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "linked_list_c"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff7f80430fa849e0be5e6a8f94026646809334a5cd6357aef7aa98c3f87348bb"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1861,6 +1871,27 @@ name = "paste"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
+
+[[package]]
+name = "pbs"
+version = "0.0.4"
+dependencies = [
+ "libc",
+ "linked_list_c",
+ "log",
+ "pbs-sys",
+ "regex",
+ "serde_json",
+]
+
+[[package]]
+name = "pbs-sys"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34107b20c1ac27254d47593d2c348d9af9753b1610464dfb008f024076093371"
+dependencies = [
+ "linked_list_c",
+]
 
 [[package]]
 name = "peeking_take_while"

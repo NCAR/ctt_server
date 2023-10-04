@@ -1,5 +1,4 @@
-use async_graphql::{EmptySubscription, Schema, SimpleObject};
-use serde::{Deserialize, Serialize};
+use async_graphql::{EmptySubscription, Schema};
 mod query;
 mod mutation;
 pub use mutation::Mutation;
