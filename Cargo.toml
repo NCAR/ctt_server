@@ -7,7 +7,6 @@ description = "Graphql api for CTT"
 repository = "https://github.com/Will-Shanks/ctt_server"
 
 [dependencies]
-pyo3 = "0.19.0"
 tokio = {version = "1", features = ["full"] }
 serde = {version="1", features = ["derive"] }
 serde_json = "1"
@@ -35,5 +34,6 @@ sea-orm-migration = "0.12"
 pbs = { path="../pbs", optional = true }
 
 [features]
-default = ["pbs", "slack"]
+default = ["pbs", "slack", "auth"]
 slack = ["slack-morphism"]
+auth = []

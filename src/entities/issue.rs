@@ -57,9 +57,7 @@ impl Entity {
     }
     pub async fn already_open(target: &str, title: &str, db: &DatabaseConnection) -> Option<Model> {
         let target = Target::find_by_name(target).one(db).await.unwrap();
-        if target.is_none() {
-            return None;
-        }
+        target.as_ref()?;
         let target = target.unwrap();
         Self::find()
             .filter(Column::IssueStatus.eq(IssueStatus::Open))

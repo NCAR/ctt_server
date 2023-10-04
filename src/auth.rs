@@ -1,11 +1,12 @@
 use async_graphql::{Context, Guard, Result};
 use axum::body::BoxBody;
 use axum::extract;
-//use axum::http::header;
+#[cfg(feature="auth")]
+use axum::http::header;
 use chrono::{NaiveDateTime, Utc};
 use http::StatusCode;
-//use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use jsonwebtoken::{encode, EncodingKey, Header};
+#[allow(unused_imports)]
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use lazy_static::lazy_static;
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
@@ -55,10 +56,14 @@ impl<B> ValidateRequest<B> for Auth {
     }
 }
 
+#[cfg(not(feature="auth"))]
 fn check_auth<B>(_request: &axum::http::Request<B>) -> Option<RoleGuard> {
     info!("checking auth");
-    Some(RoleGuard::new(Role::Admin, "shanks".to_string(), Utc::now().naive_utc() + chrono::Duration::minutes(6000)))
-    /*
+    Some(RoleGuard::new(Role::Admin, "default".to_string(), Utc::now().naive_utc() + chrono::Duration::minutes(6000)))
+}
+#[cfg(feature="auth")]
+fn check_auth<B>(request: &axum::http::Request<B>) -> Option<RoleGuard> {
+    info!("checking auth");
     request
         .headers()
         .get(header::AUTHORIZATION)
@@ -71,7 +76,6 @@ fn check_auth<B>(_request: &axum::http::Request<B>) -> Option<RoleGuard> {
                     &Validation::new(Algorithm::HS256),
                 )
                 .unwrap()).map(|c| c.claims)
-                */
 }
 
 #[derive(Deserialize, Debug)]

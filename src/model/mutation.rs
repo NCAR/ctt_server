@@ -154,7 +154,7 @@ impl Mutation {
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
         let _ = tx.send(format!("{}: Opening issue for {}: {}", usr, issue.target, issue.title)).await;
-        issue.open(usr, &db).await
+        issue.open(usr, db).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn close<'a>(&self, ctx: &Context<'a>, issue: i32, comment: String) -> Result<String, String> {
@@ -162,7 +162,7 @@ impl Mutation {
         let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
         let _ = tx.send(format!("{}: closing issue for {}: {}", usr, issue, comment)).await;
         let db = ctx.data::<DatabaseConnection>().unwrap();
-        issue_close(issue, usr, comment, &db).await
+        issue_close(issue, usr, comment, db).await
     }
     /*
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
