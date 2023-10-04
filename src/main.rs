@@ -1,3 +1,4 @@
+#![feature(let_chains)]
 mod setup;
 mod migrator;
 mod entities;

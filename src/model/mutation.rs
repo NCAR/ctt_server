@@ -11,13 +11,78 @@ use crate::entities::prelude::*;
 use crate::entities::target::{self, TargetStatus};
 use tracing::log::warn;
 
+
 #[derive(InputObject)]
 pub struct UpdateIssue {
     assigned_to: Option<String>,
     description: Option<String>,
     enforce_down: Option<bool>,
-    id: u32,
+    to_offline: Option<issue::ToOffline>,
+    id: i32,
     title: Option<String>,
+}
+
+impl UpdateIssue {
+    async fn update(&self, operator: &str, db: &DatabaseConnection) -> Result<issue::Model, String> {
+        let issue = Issue::find_by_id(self.id).one(db).await.unwrap();
+        if issue.is_none() {
+            return Err(format!("Issue {} not found", self.id));
+        }
+        let issue = issue.unwrap();
+        let mut updated_issue: issue::ActiveModel = issue.clone().into();
+        if let Some(_) = &self.assigned_to && self.assigned_to != issue.assigned_to {
+            updated_issue.assigned_to = ActiveValue::Set(self.assigned_to.clone());
+            let c = comment::ActiveModel {
+                created_by: ActiveValue::Set(operator.to_string()),
+                comment: ActiveValue::Set(format!("Updating assigned_to from {:?} to {:?}", issue.assigned_to, self.assigned_to)),
+                issue_id: ActiveValue::Set(issue.id),
+                ..Default::default()
+            };
+            c.insert(db).await.unwrap();
+        }
+        if let Some(d) = self.description.clone() && d != issue.description {
+            updated_issue.description = ActiveValue::Set(d.clone());
+            let c = comment::ActiveModel {
+                created_by: ActiveValue::Set(operator.to_string()),
+                comment: ActiveValue::Set(format!("Updating description from {:?} to {:?}", issue.description, d)),
+                issue_id: ActiveValue::Set(issue.id),
+                ..Default::default()
+            };
+            c.insert(db).await.unwrap();
+        }
+        if let Some(t) = self.title.clone() && t != issue.title {
+            updated_issue.title = ActiveValue::Set(t.to_string());
+            let c = comment::ActiveModel {
+                created_by: ActiveValue::Set(operator.to_string()),
+                comment: ActiveValue::Set(format!("Updating title from {:?} to {:?}", issue.title, t)),
+                issue_id: ActiveValue::Set(issue.id),
+                ..Default::default()
+            };
+            c.insert(db).await.unwrap();
+        }
+        if let Some(_) = self.to_offline && self.to_offline != issue.to_offline {
+            updated_issue.to_offline = ActiveValue::Set(self.to_offline);
+            let c = comment::ActiveModel {
+                created_by: ActiveValue::Set(operator.to_string()),
+                comment: ActiveValue::Set(format!("Updating to_offline from {:?} to {:?}", issue.to_offline, self.to_offline)),
+                issue_id: ActiveValue::Set(issue.id),
+                ..Default::default()
+            };
+            c.insert(db).await.unwrap();
+            //TODO offline/resume nodes that should be
+        }
+        if let Some(e) = self.enforce_down && e != issue.enforce_down {
+            updated_issue.enforce_down = ActiveValue::Set(e);
+            let c = comment::ActiveModel {
+                created_by: ActiveValue::Set(operator.to_string()),
+                comment: ActiveValue::Set(format!("Updating enforce_down from {:?} to {:?}", issue.enforce_down, e)),
+                issue_id: ActiveValue::Set(issue.id),
+                ..Default::default()
+            };
+            c.insert(db).await.unwrap();
+        }
+       Ok(updated_issue.update(db).await.unwrap())
+    }
 }
 
 #[derive(InputObject)]
@@ -56,8 +121,9 @@ impl NewIssue {
         let target_id = target.id;
         #[cfg(feature="pbs")]
         let srv = Server::new();
-        // TODO only set offline if not already offline
-        //let status = srv.stat_host(&None, None);
+        // TODO only offline in pbs if not already offline
+        #[cfg(feature="pbs")]
+        let status = srv.stat_host(&None, None);
         let off: Result<(), String> = match self.to_offline {
             None => {
                 #[cfg(feature="pbs")]
@@ -81,7 +147,6 @@ impl NewIssue {
             Some(issue::ToOffline::Target) => {
                 #[cfg(feature="pbs")]
                 srv.offline_vnode(&self.target, Some(&self.title))?;
-                //TODO set target to draining
                 let mut target: target::ActiveModel = target.into();
                 target.status = ActiveValue::Set(TargetStatus::Draining);
                 target.update(db).await.unwrap();
@@ -96,7 +161,6 @@ impl NewIssue {
             to_offline: ActiveValue::Set(self.to_offline),
             enforce_down: ActiveValue::Set(self.enforce_down.unwrap_or(false)),
             issue_status: ActiveValue::Set(IssueStatus::Open),
-            //TODO insert target if not exists
             target_id: ActiveValue::Set(target_id),
             title: ActiveValue::Set(self.title.clone()),
             ..Default::default()
@@ -150,7 +214,6 @@ impl Mutation {
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Result<issue::Model, String> {
         let db = ctx.data::<DatabaseConnection>().unwrap();
-        //TODO get operator from authentication
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
         let _ = tx.send(format!("{}: Opening issue for {}: {}", usr, issue.target, issue.title)).await;
@@ -164,24 +227,10 @@ impl Mutation {
         let db = ctx.data::<DatabaseConnection>().unwrap();
         issue_close(issue, usr, comment, db).await
     }
-    /*
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn update<'a>(&self, ctx: &Context<'a>, issue: UpdateIssue) -> issue::Model {
-        todo!()
+    async fn update_issue<'a>(&self, ctx: &Context<'a>, issue: UpdateIssue) -> Result<issue::Model, String> {
+        let usr: String = ctx.data_opt::<RoleGuard>().unwrap().user.clone();
+        let db = ctx.data::<DatabaseConnection>().unwrap();
+        issue.update(&usr, &db).await
     }
-    #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn drain<'a>(&self, ctx: &Context<'a>, issue: u32) -> String {
-        let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
-        let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
-        let _ = tx.send(format!("{}: draing nodes for issue {}", usr, issue)).await;
-        todo!()
-    }
-    #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn release<'a>(&self, ctx: &Context<'a>, issue: u32) -> String {
-        let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
-        let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
-        let _ = tx.send(format!("{}: resuming nodes for issue {}", usr, issue)).await;
-        todo!()
-    }
-    */
 }
