@@ -37,3 +37,4 @@ pbs = { path="../pbs", optional = true }
 default = ["pbs", "slack", "auth"]
 slack = ["slack-morphism"]
 auth = []
+gust = []

@@ -2,6 +2,7 @@
 mod setup;
 mod migrator;
 mod entities;
+mod cluster;
 use setup::setup_and_connect;
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
 use std::env;

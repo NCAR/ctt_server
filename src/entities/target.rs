@@ -53,3 +53,16 @@ pub enum TargetStatus {
     Unknown,
 }
 
+impl TargetStatus {
+    pub fn from_str(state: &str) -> Option<Self> {
+        match state {
+            "Online" => Some(Self::Online),
+            "Draining" => Some(Self::Draining),
+            "Offline" => Some(Self::Offline),
+            "Down" => Some(Self::Down),
+            "Unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+}
+

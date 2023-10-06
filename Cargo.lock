@@ -1880,8 +1880,6 @@ dependencies = [
 [[package]]
 name = "pbs-sys"
 version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34107b20c1ac27254d47593d2c348d9af9753b1610464dfb008f024076093371"
 dependencies = [
  "linked_list_c",
 ]

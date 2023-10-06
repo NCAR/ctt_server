@@ -1,10 +1,14 @@
-use sea_orm::{DatabaseConnection, ActiveModelTrait};
+use sea_orm::{DatabaseConnection, ActiveModelTrait, QueryFilter, ColumnTrait};
+use std::collections::HashMap;
 use sea_orm::entity::ActiveValue;
 use crate::auth::{Role, RoleChecker, RoleGuard};
 use async_graphql::{Context, InputObject, Object, Result};
 use tokio::sync::mpsc;
 #[cfg(feature="pbs")]
 use pbs::Server;
+use crate::cluster::ClusterTrait;
+#[cfg(feature="gust")]
+use crate::cluster::Gust as Cluster;
 use crate::entities::issue::{self, IssueStatus};
 use crate::entities::comment;
 use crate::entities::prelude::*;
@@ -69,7 +73,8 @@ impl UpdateIssue {
                 ..Default::default()
             };
             c.insert(db).await.unwrap();
-            //TODO offline/resume nodes that should be
+            //TODO offline nodes that should be if increasing to_offline group
+            check_blade(&Target::find_by_id(issue.id).one(db).await.unwrap().unwrap().name, db).await.unwrap();
         }
         if let Some(e) = self.enforce_down && e != issue.enforce_down {
             updated_issue.enforce_down = ActiveValue::Set(e);
@@ -104,6 +109,102 @@ async fn create_target(target: &str, db: &DatabaseConnection) -> target::Model {
         new_target.insert(db).await.unwrap()
 }
 
+async fn check_blade(target: &str, db: &DatabaseConnection) -> Result<(), ()> {
+    let srv = Server::new();
+    let status = srv.stat_host(&None, None).unwrap();
+    let nodes = Cluster::cousins(target);
+    // current status of nodes in blade
+    let current_status: HashMap<String, TargetStatus> = status.resources.into_iter()
+        .filter(|n| {nodes.iter().any(|t| n.name().eq(t))})
+        //only care about ones that aren't already offline
+        .map(|n| (n.name(), 
+                  if let pbs::Attrl::Value(pbs::Op::Equal(state)) = n.attribs().get("state").unwrap() {
+                      //don't care about nuance here, make state binary, node is either offline or online
+                      if state.contains("offline") || state.contains("down") || state.contains("unknown") {
+                          TargetStatus::Offline
+                      }else{
+                          TargetStatus::Online
+                      }
+                  }else{
+                      panic!()
+                  }
+                )
+             )
+        .collect();
+
+    // expected status of nodes in blade
+    let mut expected_status: HashMap<String, (TargetStatus, bool)> = Cluster::cousins(target).into_iter()
+        .map(|t| (t, (TargetStatus::Online, false))).collect();
+    for node in Cluster::cousins(target) {
+        if let Ok(issues) = Issue::find_by_target_name(&node, db).await.all(db).await {
+            for i in issues {
+                for n in node_group(&node, i.to_offline) {
+                    expected_status.insert(n.clone(), (TargetStatus::Offline, expected_status.get(&n).unwrap().1 || i.enforce_down));
+                }
+            }
+        }
+    }
+    // rectify differences
+    for (node, state) in current_status {
+        // check if expected is the same as actual
+        let expected = expected_status.get(&node).unwrap();
+        if expected.0 != state {
+            if expected.0 == TargetStatus::Online {
+                //node should be online but isn't, resume it
+                srv.clear_vnode(&node, Some("")).unwrap();
+            } else if expected.1 {
+                // node is expected to be offline, and enforce flag is set
+                // so offline it
+                srv.offline_vnode(&node, Some("ctt enforcing node offline")).unwrap();
+            } else {
+                // node is expected to be offline, and no enforce flag 
+                // assume it is fixed and close any open issues on the target
+                for issue in Issue::find_by_target_name(&node, db).await
+                    .filter(issue::Column::IssueStatus.eq(IssueStatus::Open))
+                        .all(db).await.unwrap() { 
+                    let mut i: issue::ActiveModel = issue.into();
+                    i.issue_status = ActiveValue::Set(IssueStatus::Closed);
+                    i.update(db).await.unwrap();
+                    //TODO add comment found node online, closing ticket
+                }
+                let mut target: target::ActiveModel = Target::find_by_name(&node).one(db).await.unwrap().unwrap().into();
+                target.status = ActiveValue::Set(TargetStatus::Online);
+                target.update(db).await.unwrap();
+            }
+        }
+    }
+    Ok(())
+}
+
+
+fn node_group(target: &str, group: Option<issue::ToOffline>) -> Vec<String> {
+    match group {
+        None => vec![],
+        Some(issue::ToOffline::Cousins) => {
+            Cluster::cousins(target)
+        },
+        Some(issue::ToOffline::Siblings) => {
+            Cluster::siblings(target)
+        },
+        Some(issue::ToOffline::Target) => {
+            vec![]
+        },
+    }
+}
+
+fn to_offline(target: &str, status: pbs::StatResp, group: Option<issue::ToOffline> ) -> Vec<String> {
+    let to_offline = node_group(target, group);
+    status.resources.into_iter()
+        //only care about nodes in `to_offline`
+        .filter(|n| {to_offline.iter().any(|t| n.name().eq(t))})
+        .filter(|t| t.name().ne(target))
+        //only care about ones that aren't already offline
+        .filter(|n| {
+            &pbs::Attrl::Value(pbs::Op::Equal("offline".to_string())) != n.attribs().get("state").unwrap()
+        })
+        .map(|n| n.name()).collect()
+}
+
 impl NewIssue {
     async fn open(&self, operator: &str, db: &DatabaseConnection) -> Result<issue::Model, String> {
         if let Some(i) = Issue::already_open(&self.target, &self.title, db).await {
@@ -120,40 +221,23 @@ impl NewIssue {
         };
         let target_id = target.id;
         #[cfg(feature="pbs")]
-        let srv = Server::new();
-        // TODO only offline in pbs if not already offline
-        #[cfg(feature="pbs")]
-        let status = srv.stat_host(&None, None);
-        let off: Result<(), String> = match self.to_offline {
-            None => {
-                #[cfg(feature="pbs")]
-                srv.offline_vnode(&self.target, Some(&self.title))?;
-                //TODO set target to draining
+        {
+            let srv = Server::new();
+            let status = srv.stat_host(&None, None).unwrap();
+            for t in to_offline(&self.target, status, self.to_offline).into_iter() {
+                let _ = srv.offline_vnode(&t, Some(&format!("{} sibling", &t))).unwrap();
+                let mut sib: target::ActiveModel = Target::find_by_name(&t).one(db).await.unwrap().unwrap().into();
+                sib.status = ActiveValue::Set(TargetStatus::Draining);
+                sib.update(db).await.unwrap();
+            }
+            if let Some(_) = self.to_offline {
+                let _ = srv.offline_vnode(&self.target, Some(&self.title));
                 let mut target: target::ActiveModel = target.into();
                 target.status = ActiveValue::Set(TargetStatus::Draining);
                 target.update(db).await.unwrap();
-                Ok(())
-            },
-            Some(issue::ToOffline::Cousins) => {
-                todo!()
-                //srv.offline(cluster.blade(self.target), format!("{} sibling", self.target));
-                //srv.offline(vec!(self.target), &self.title);
-            },
-            Some(issue::ToOffline::Siblings) => {
-                todo!()
-                //srv.offline(cluster.card(self.target), format!("{} sibling", self.target));
-                //srv.offline(vec!(self.target), &self.title);
-            },
-            Some(issue::ToOffline::Target) => {
-                #[cfg(feature="pbs")]
-                srv.offline_vnode(&self.target, Some(&self.title))?;
-                let mut target: target::ActiveModel = target.into();
-                target.status = ActiveValue::Set(TargetStatus::Draining);
-                target.update(db).await.unwrap();
-                Ok(())
-            },
-        };
-        off.unwrap();
+            }
+        }
+
         let new_issue = issue::ActiveModel{
             assigned_to: ActiveValue::Set(self.assigned_to.clone()),
             created_by: ActiveValue::Set(operator.to_string()),
@@ -192,16 +276,8 @@ async fn issue_close(cttissue: i32, operator: String, comment: String, db: &Data
             ..Default::default()
         };
         c.insert(db).await.unwrap();
-        #[allow(unused_variables)]
         let target = Target::find_by_id(target_id).one(db).await.unwrap().unwrap();
-        #[cfg(feature="pbs")]
-        let srv = Server::new();
-        #[cfg(feature="pbs")]
-        srv.clear_vnode(&target.name, Some(""))?;
-        //TODO check if there are any other issues on target, or siblings with correct to_offline flag before resuming
-        let mut target: target::ActiveModel = target.into();
-        target.status = ActiveValue::Set(TargetStatus::Online);
-        target.update(db).await.unwrap();
+        check_blade(&target.name, db).await.unwrap();
     }
     Ok(format!("closed {}", cttissue))
 }

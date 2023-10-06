@@ -56,14 +56,17 @@ impl Entity {
         Self::find().filter(Column::Id.eq(id))
     }
     pub async fn already_open(target: &str, title: &str, db: &DatabaseConnection) -> Option<Model> {
-        let target = Target::find_by_name(target).one(db).await.unwrap();
-        target.as_ref()?;
-        let target = target.unwrap();
-        Self::find()
+        Self::find_by_target_name(target, db).await
             .filter(Column::IssueStatus.eq(IssueStatus::Open))
             .filter(Column::Title.eq(title))
-            .filter(Column::TargetId.eq(target.id))
             .one(db).await.unwrap()
+    }
+    pub fn find_by_target(target: i32) -> Select<Entity> {
+        Self::find().filter(Column::TargetId.eq(target))
+    }
+    pub async fn find_by_target_name(target: &str, db: &DatabaseConnection) -> Select<Entity> {
+        let target = Target::find_by_name(target).one(db).await.unwrap().unwrap();
+        Self::find_by_target(target.id)
     }
 }
 
