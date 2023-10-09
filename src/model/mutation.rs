@@ -73,8 +73,25 @@ impl UpdateIssue {
                 ..Default::default()
             };
             c.insert(db).await.unwrap();
-            //TODO offline nodes that should be if increasing to_offline group
-            check_blade(&Target::find_by_id(issue.id).one(db).await.unwrap().unwrap().name, db).await.unwrap();
+        #[cfg(feature="pbs")]
+        {
+            let srv = Server::new();
+            let status = srv.stat_host(&None, None).unwrap();
+            let target = Target::find_by_issue_id(self.id, &db).await.one(db).await.unwrap().unwrap();
+            for t in to_offline(&target.name, status, self.to_offline).into_iter() {
+                let _ = srv.offline_vnode(&t, Some(&format!("{} sibling", &t))).unwrap();
+                let mut sib: target::ActiveModel = Target::find_by_name(&t).one(db).await.unwrap().unwrap().into();
+                sib.status = ActiveValue::Set(TargetStatus::Draining);
+                sib.update(db).await.unwrap();
+            }
+            //TODO only try offlining if it isn't draining already
+            if let Some(_) = self.to_offline {
+                let _ = srv.offline_vnode(&target.name, Some(&issue.title));
+                let mut t: target::ActiveModel = target.into();
+                t.status = ActiveValue::Set(TargetStatus::Draining);
+                t.update(db).await.unwrap();
+            }
+        }
         }
         if let Some(e) = self.enforce_down && e != issue.enforce_down {
             updated_issue.enforce_down = ActiveValue::Set(e);
@@ -86,7 +103,9 @@ impl UpdateIssue {
             };
             c.insert(db).await.unwrap();
         }
-       Ok(updated_issue.update(db).await.unwrap())
+       let ret = updated_issue.update(db).await.unwrap();
+       check_blade(&Target::find_by_id(issue.id).one(db).await.unwrap().unwrap().name, db).await.unwrap();
+       Ok(ret)
     }
 }
 

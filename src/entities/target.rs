@@ -3,6 +3,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Serialize, Deserialize};
 use async_graphql::*;
+use super::prelude::Issue;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, SimpleObject)]
 #[sea_orm(table_name = "target")]
@@ -35,6 +36,10 @@ impl Entity {
     }
     pub fn find_by_id(id: i32) -> Select<Entity> {
         Self::find().filter(Column::Id.eq(id))
+    }
+    pub async fn find_by_issue_id(issue_id: i32, db: &DatabaseConnection) -> Select<Entity> {
+        let issue = Issue::find_by_id(issue_id).one(db).await.unwrap().unwrap();
+        Self::find_by_id(issue.target_id)
     }
 }
 
