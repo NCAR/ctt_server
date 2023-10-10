@@ -7,11 +7,14 @@ GraphQL api server for CTT
 - `slack` enables sending slack messages on certain events
 - `auth` enables authentication, using posix groups on the server node
   - currently the only flow uses munge, however other flows planned (eventually...)
+### Systems
+- one of these is required
+- `gust` used to compile for the gust system
 
 ## Dev setup
 - generate a cert with `openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 3650 -nodes -subj "/C=XX/ST=StateName/L=CityName/O=CompanyName/OU=CompanySectionName/CN=127.0.0.1"`
 - client needs cert
-- `cargo run --no-default-features`
+- `cargo run --no-default-features -F gust`
 
 ## querys
 ```

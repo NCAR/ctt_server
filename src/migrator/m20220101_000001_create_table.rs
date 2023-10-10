@@ -1,5 +1,5 @@
-use sea_orm_migration::prelude::*;
 use sea_orm::{EnumIter, Iterable};
+use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -7,7 +7,7 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager 
+        manager
             .create_table(
                 Table::create()
                     .table(Target::Table)
@@ -24,15 +24,16 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Target::Name)
                             .string()
                             .unique_key()
-                            .not_null()
+                            .not_null(),
                     )
                     .col(
                         ColumnDef::new(Target::Status)
                             .enumeration(Target::Table, TargetStatus::iter().skip(1))
-                            .not_null()
+                            .not_null(),
                     )
-                    .to_owned()
-        ).await?;
+                    .to_owned(),
+            )
+            .await?;
         manager
             .create_table(
                 Table::create()
@@ -46,60 +47,38 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Issue::Title)
-                            .string()
-                            .not_null()
-                    )
-                    .col(
-                        ColumnDef::new(Issue::Description)
-                            .string()
-                            .not_null()
-                    )
+                    .col(ColumnDef::new(Issue::Title).string().not_null())
+                    .col(ColumnDef::new(Issue::Description).string().not_null())
                     .col(
                         ColumnDef::new(Issue::IssueStatus)
                             .enumeration(IssueStatus::Table, IssueStatus::iter().skip(1))
-                            .not_null()
+                            .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(Issue::TargetId)
-                            .integer()
-                            .not_null()
-                    )
-                    .col(
-                        ColumnDef::new(Issue::CreatedBy)
-                            .string()
-                            .not_null()
-                    )
+                    .col(ColumnDef::new(Issue::TargetId).integer().not_null())
+                    .col(ColumnDef::new(Issue::CreatedBy).string().not_null())
                     .col(
                         ColumnDef::new(Issue::ToOffline)
-                            .enumeration(ToOffline::Table, ToOffline::iter().skip(1))
+                            .enumeration(ToOffline::Table, ToOffline::iter().skip(1)),
                     )
-                    .col(
-                        ColumnDef::new(Issue::AssignedTo)
-                            .string()
-                    )
+                    .col(ColumnDef::new(Issue::AssignedTo).string())
                     .col(
                         ColumnDef::new(Issue::CreatedAt)
                             .date_time()
                             .default(Expr::current_timestamp())
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(Issue::EnforceDown)
-                            .boolean()
-                            .not_null()
-                    )
+                    .col(ColumnDef::new(Issue::EnforceDown).boolean().not_null())
                     .foreign_key(
                         ForeignKey::create()
-                        .name("target")
-                        .from(Issue::Table, Issue::TargetId)
-                        .to(Target::Table, Target::Id)
-                        .on_delete(ForeignKeyAction::Cascade)
-                        .on_update(ForeignKeyAction::Cascade),
+                            .name("target")
+                            .from(Issue::Table, Issue::TargetId)
+                            .to(Target::Table, Target::Id)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .on_update(ForeignKeyAction::Cascade),
                     )
-                    .to_owned()
-            ).await?;
+                    .to_owned(),
+            )
+            .await?;
         manager
             .create_table(
                 Table::create()
@@ -110,23 +89,11 @@ impl MigrationTrait for Migration {
                             .integer()
                             .not_null()
                             .auto_increment()
-                            .primary_key()
+                            .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Comment::IssueId)
-                            .integer()
-                            .not_null()
-                    )
-                    .col(
-                        ColumnDef::new(Comment::CreatedBy)
-                            .string()
-                            .not_null()
-                    )
-                    .col(
-                        ColumnDef::new(Comment::Comment)
-                            .string()
-                            .not_null()
-                    )
+                    .col(ColumnDef::new(Comment::IssueId).integer().not_null())
+                    .col(ColumnDef::new(Comment::CreatedBy).string().not_null())
+                    .col(ColumnDef::new(Comment::Comment).string().not_null())
                     .col(
                         ColumnDef::new(Comment::CreatedAt)
                             .date_time()
@@ -135,12 +102,13 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                        .name("issue")
-                        .from(Comment::Table, Comment::IssueId)
-                        .to(Issue::Table, Issue::Id)
-                        .on_delete(ForeignKeyAction::Cascade)
-                        .on_update(ForeignKeyAction::Cascade),
-                    ).to_owned(),
+                            .name("issue")
+                            .from(Comment::Table, Comment::IssueId)
+                            .to(Issue::Table, Issue::Id)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .on_update(ForeignKeyAction::Cascade),
+                    )
+                    .to_owned(),
             )
             .await
     }
@@ -199,7 +167,7 @@ enum IssueStatus {
 }
 
 #[derive(Iden, EnumIter)]
-enum ToOffline{
+enum ToOffline {
     Table,
     Target,
     Siblings,

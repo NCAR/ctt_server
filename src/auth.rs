@@ -1,7 +1,7 @@
 use async_graphql::{Context, Guard, Result};
 use axum::body::BoxBody;
 use axum::extract;
-#[cfg(feature="auth")]
+#[cfg(feature = "auth")]
 use axum::http::header;
 use chrono::{NaiveDateTime, Utc};
 use http::StatusCode;
@@ -14,10 +14,8 @@ use std::collections::HashSet;
 use tower_http::validate_request::ValidateRequest;
 use tracing::{debug, info};
 
-
 lazy_static! {
     static ref SECRET: String = {
-        
         rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(64)
@@ -56,12 +54,16 @@ impl<B> ValidateRequest<B> for Auth {
     }
 }
 
-#[cfg(not(feature="auth"))]
+#[cfg(not(feature = "auth"))]
 fn check_auth<B>(_request: &axum::http::Request<B>) -> Option<RoleGuard> {
     info!("checking auth");
-    Some(RoleGuard::new(Role::Admin, "default".to_string(), Utc::now().naive_utc() + chrono::Duration::minutes(6000)))
+    Some(RoleGuard::new(
+        Role::Admin,
+        "default".to_string(),
+        Utc::now().naive_utc() + chrono::Duration::minutes(6000),
+    ))
 }
-#[cfg(feature="auth")]
+#[cfg(feature = "auth")]
 fn check_auth<B>(request: &axum::http::Request<B>) -> Option<RoleGuard> {
     info!("checking auth");
     request
@@ -69,13 +71,19 @@ fn check_auth<B>(request: &axum::http::Request<B>) -> Option<RoleGuard> {
         .get(header::AUTHORIZATION)
         .and_then(|auth_header| auth_header.to_str().ok())
         .and_then(|auth_value| {
-            auth_value.strip_prefix("Bearer ").map(|stripped| stripped.to_owned())
-        }).map(|t| decode::<RoleGuard>(
-                    &t,
-                    &DecodingKey::from_base64_secret(&SECRET).unwrap(),
-                    &Validation::new(Algorithm::HS256),
-                )
-                .unwrap()).map(|c| c.claims)
+            auth_value
+                .strip_prefix("Bearer ")
+                .map(|stripped| stripped.to_owned())
+        })
+        .map(|t| {
+            decode::<RoleGuard>(
+                &t,
+                &DecodingKey::from_base64_secret(&SECRET).unwrap(),
+                &Validation::new(Algorithm::HS256),
+            )
+            .unwrap()
+        })
+        .map(|c| c.claims)
 }
 
 #[derive(Deserialize, Debug)]
@@ -104,9 +112,8 @@ async fn check_role(usr: &str, uid: u32) -> Option<Role> {
         .map(|g| g.name().to_os_string().into_string())
         .filter_map(|x| x.ok())
         .collect();
-    println!("{:?}", &groups);
-    let admin = vec!["shanks", "dhsg"];
-    let guest = vec!["shanks"];
+    let admin = vec!["shanks", "hsg", "ssg", "root"];
+    let guest = vec!["ncar"];
     for g in admin {
         if groups.contains(g) {
             info!("admin!");

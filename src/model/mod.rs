@@ -1,6 +1,6 @@
 use async_graphql::{EmptySubscription, Schema};
-mod query;
 mod mutation;
+mod query;
 pub use mutation::Mutation;
 pub use query::Query;
 

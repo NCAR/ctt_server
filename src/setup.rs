@@ -1,8 +1,8 @@
-use sea_orm::*;
-use sea_orm_migration::{SchemaManager, MigratorTrait};
 use crate::migrator::Migrator;
+use sea_orm::*;
+use sea_orm_migration::{MigratorTrait, SchemaManager};
 
-const DATABASE_URL: &str = "sqlite:///home/shanks/projects/ctt_rs/ctt_server/db.sqlite";
+const DATABASE_URL: &str = "sqlite:///glade/u/home/shanks/work/ctt_srv/db.sqlite";
 const DB_NAME: &str = "mydb";
 
 pub async fn setup_and_connect() -> Result<DatabaseConnection, DbErr> {
@@ -35,16 +35,17 @@ pub async fn setup_and_connect() -> Result<DatabaseConnection, DbErr> {
         }
         DbBackend::Sqlite => db,
     };
-    
+
     let schema_manager = SchemaManager::new(&db);
 
-    if !schema_manager.has_table("issue").await? ||
-        !schema_manager.has_table("comment").await? ||
-        !schema_manager.has_table("target").await? {
+    if !schema_manager.has_table("issue").await?
+        || !schema_manager.has_table("comment").await?
+        || !schema_manager.has_table("target").await?
+    {
         Migrator::refresh(&db).await?;
     }
     assert!(schema_manager.has_table("issue").await?);
     assert!(schema_manager.has_table("comment").await?);
 
-     Ok(db)
+    Ok(db)
 }

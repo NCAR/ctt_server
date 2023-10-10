@@ -1,20 +1,19 @@
-use sea_orm::{DatabaseConnection, ActiveModelTrait, QueryFilter, ColumnTrait};
-use std::collections::HashMap;
-use sea_orm::entity::ActiveValue;
 use crate::auth::{Role, RoleChecker, RoleGuard};
-use async_graphql::{Context, InputObject, Object, Result};
-use tokio::sync::mpsc;
-#[cfg(feature="pbs")]
-use pbs::Server;
 use crate::cluster::ClusterTrait;
-#[cfg(feature="gust")]
+#[cfg(feature = "gust")]
 use crate::cluster::Gust as Cluster;
-use crate::entities::issue::{self, IssueStatus};
 use crate::entities::comment;
+use crate::entities::issue::{self, IssueStatus};
 use crate::entities::prelude::*;
 use crate::entities::target::{self, TargetStatus};
+use async_graphql::{Context, InputObject, Object, Result};
+#[cfg(feature = "pbs")]
+use pbs::Server;
+use sea_orm::entity::ActiveValue;
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, QueryFilter};
+use std::collections::HashMap;
+use tokio::sync::mpsc;
 use tracing::log::warn;
-
 
 #[derive(InputObject)]
 pub struct UpdateIssue {
@@ -27,7 +26,11 @@ pub struct UpdateIssue {
 }
 
 impl UpdateIssue {
-    async fn update(&self, operator: &str, db: &DatabaseConnection) -> Result<issue::Model, String> {
+    async fn update(
+        &self,
+        operator: &str,
+        db: &DatabaseConnection,
+    ) -> Result<issue::Model, String> {
         let issue = Issue::find_by_id(self.id).one(db).await.unwrap();
         if issue.is_none() {
             return Err(format!("Issue {} not found", self.id));
@@ -77,15 +80,15 @@ impl UpdateIssue {
         {
             let srv = Server::new();
             let status = srv.stat_host(&None, None).unwrap();
-            let target = Target::find_by_issue_id(self.id, &db).await.one(db).await.unwrap().unwrap();
+            let target = Target::find_by_issue_id(self.id, db).await.one(db).await.unwrap().unwrap();
             for t in to_offline(&target.name, status, self.to_offline).into_iter() {
-                let _ = srv.offline_vnode(&t, Some(&format!("{} sibling", &t))).unwrap();
+                srv.offline_vnode(&t, Some(&format!("{} sibling", &t))).unwrap();
                 let mut sib: target::ActiveModel = Target::find_by_name(&t).one(db).await.unwrap().unwrap().into();
                 sib.status = ActiveValue::Set(TargetStatus::Draining);
                 sib.update(db).await.unwrap();
             }
             //TODO only try offlining if it isn't draining already
-            if let Some(_) = self.to_offline {
+            if self.to_offline.is_some() {
                 let _ = srv.offline_vnode(&target.name, Some(&issue.title));
                 let mut t: target::ActiveModel = target.into();
                 t.status = ActiveValue::Set(TargetStatus::Draining);
@@ -103,9 +106,19 @@ impl UpdateIssue {
             };
             c.insert(db).await.unwrap();
         }
-       let ret = updated_issue.update(db).await.unwrap();
-       check_blade(&Target::find_by_id(issue.id).one(db).await.unwrap().unwrap().name, db).await.unwrap();
-       Ok(ret)
+        updated_issue.update(db).await.unwrap();
+        check_blade(
+            &Target::find_by_id(issue.id)
+                .one(db)
+                .await
+                .unwrap()
+                .unwrap()
+                .name,
+            db,
+        )
+        .await
+        .unwrap();
+        Ok(Issue::find_by_id(self.id).one(db).await.unwrap().unwrap())
     }
 }
 
@@ -119,46 +132,53 @@ pub struct NewIssue {
     title: String,
 }
 
-async fn create_target(target: &str, db: &DatabaseConnection) -> target::Model {
-        let new_target = target::ActiveModel{
-            name: ActiveValue::Set(target.to_string()),
-            status: ActiveValue::Set(target::TargetStatus::Online),
-            ..Default::default()
-        };
-        new_target.insert(db).await.unwrap()
-}
-
 async fn check_blade(target: &str, db: &DatabaseConnection) -> Result<(), ()> {
     let srv = Server::new();
     let status = srv.stat_host(&None, None).unwrap();
     let nodes = Cluster::cousins(target);
     // current status of nodes in blade
-    let current_status: HashMap<String, TargetStatus> = status.resources.into_iter()
-        .filter(|n| {nodes.iter().any(|t| n.name().eq(t))})
+    let current_status: HashMap<String, TargetStatus> = status
+        .resources
+        .into_iter()
+        .filter(|n| nodes.iter().any(|t| n.name().eq(t)))
         //only care about ones that aren't already offline
-        .map(|n| (n.name(), 
-                  if let pbs::Attrl::Value(pbs::Op::Equal(state)) = n.attribs().get("state").unwrap() {
-                      //don't care about nuance here, make state binary, node is either offline or online
-                      if state.contains("offline") || state.contains("down") || state.contains("unknown") {
-                          TargetStatus::Offline
-                      }else{
-                          TargetStatus::Online
-                      }
-                  }else{
-                      panic!()
-                  }
-                )
-             )
+        .map(|n| {
+            (
+                n.name(),
+                if let pbs::Attrl::Value(pbs::Op::Equal(state)) = n.attribs().get("state").unwrap()
+                {
+                    //don't care about nuance here, make state binary, node is either offline or online
+                    if state.contains("offline")
+                        || state.contains("down")
+                        || state.contains("unknown")
+                    {
+                        TargetStatus::Offline
+                    } else {
+                        TargetStatus::Online
+                    }
+                } else {
+                    panic!()
+                },
+            )
+        })
         .collect();
 
     // expected status of nodes in blade
-    let mut expected_status: HashMap<String, (TargetStatus, bool)> = Cluster::cousins(target).into_iter()
-        .map(|t| (t, (TargetStatus::Online, false))).collect();
+    let mut expected_status: HashMap<String, (TargetStatus, bool)> = Cluster::cousins(target)
+        .into_iter()
+        .map(|t| (t, (TargetStatus::Online, false)))
+        .collect();
     for node in Cluster::cousins(target) {
         if let Ok(issues) = Issue::find_by_target_name(&node, db).await.all(db).await {
             for i in issues {
                 for n in node_group(&node, i.to_offline) {
-                    expected_status.insert(n.clone(), (TargetStatus::Offline, expected_status.get(&n).unwrap().1 || i.enforce_down));
+                    expected_status.insert(
+                        n.clone(),
+                        (
+                            TargetStatus::Offline,
+                            expected_status.get(&n).unwrap().1 || i.enforce_down,
+                        ),
+                    );
                 }
             }
         }
@@ -174,19 +194,29 @@ async fn check_blade(target: &str, db: &DatabaseConnection) -> Result<(), ()> {
             } else if expected.1 {
                 // node is expected to be offline, and enforce flag is set
                 // so offline it
-                srv.offline_vnode(&node, Some("ctt enforcing node offline")).unwrap();
+                srv.offline_vnode(&node, Some("ctt enforcing node offline"))
+                    .unwrap();
             } else {
-                // node is expected to be offline, and no enforce flag 
+                // node is expected to be offline, and no enforce flag
                 // assume it is fixed and close any open issues on the target
-                for issue in Issue::find_by_target_name(&node, db).await
+                for issue in Issue::find_by_target_name(&node, db)
+                    .await
                     .filter(issue::Column::IssueStatus.eq(IssueStatus::Open))
-                        .all(db).await.unwrap() { 
+                    .all(db)
+                    .await
+                    .unwrap()
+                {
                     let mut i: issue::ActiveModel = issue.into();
                     i.issue_status = ActiveValue::Set(IssueStatus::Closed);
                     i.update(db).await.unwrap();
                     //TODO add comment found node online, closing ticket
                 }
-                let mut target: target::ActiveModel = Target::find_by_name(&node).one(db).await.unwrap().unwrap().into();
+                let mut target: target::ActiveModel = Target::find_by_name(&node)
+                    .one(db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .into();
                 target.status = ActiveValue::Set(TargetStatus::Online);
                 target.update(db).await.unwrap();
             }
@@ -195,61 +225,63 @@ async fn check_blade(target: &str, db: &DatabaseConnection) -> Result<(), ()> {
     Ok(())
 }
 
-
 fn node_group(target: &str, group: Option<issue::ToOffline>) -> Vec<String> {
     match group {
         None => vec![],
-        Some(issue::ToOffline::Cousins) => {
-            Cluster::cousins(target)
-        },
-        Some(issue::ToOffline::Siblings) => {
-            Cluster::siblings(target)
-        },
+        Some(issue::ToOffline::Cousins) => Cluster::cousins(target),
+        Some(issue::ToOffline::Siblings) => Cluster::siblings(target),
         Some(issue::ToOffline::Target) => {
             vec![]
-        },
+        }
     }
 }
 
-fn to_offline(target: &str, status: pbs::StatResp, group: Option<issue::ToOffline> ) -> Vec<String> {
+fn to_offline(target: &str, status: pbs::StatResp, group: Option<issue::ToOffline>) -> Vec<String> {
     let to_offline = node_group(target, group);
-    status.resources.into_iter()
+    status
+        .resources
+        .into_iter()
         //only care about nodes in `to_offline`
-        .filter(|n| {to_offline.iter().any(|t| n.name().eq(t))})
+        .filter(|n| to_offline.iter().any(|t| n.name().eq(t)))
         .filter(|t| t.name().ne(target))
         //only care about ones that aren't already offline
         .filter(|n| {
-            &pbs::Attrl::Value(pbs::Op::Equal("offline".to_string())) != n.attribs().get("state").unwrap()
+            &pbs::Attrl::Value(pbs::Op::Equal("offline".to_string()))
+                != n.attribs().get("state").unwrap()
         })
-        .map(|n| n.name()).collect()
+        .map(|n| n.name())
+        .collect()
 }
 
 impl NewIssue {
     async fn open(&self, operator: &str, db: &DatabaseConnection) -> Result<issue::Model, String> {
         if let Some(i) = Issue::already_open(&self.target, &self.title, db).await {
-            return Ok(i)
+            return Ok(i);
         }
-        let target = Target::find_by_name(&self.target).one(db).await.unwrap();
-        let target = if target.is_none() {
-            warn!("Target not found, creating {}", self.target);
-            create_target(&self.target, db).await
-        } else {
-            let t = target.unwrap();
-            warn!("Target exists, with id {}", t.id);
+        let target = if let Some(t) = Target::find_by_name(&self.target).one(db).await.unwrap() {
             t
+        } else {
+            warn!("Target not found, creating {}", self.target);
+            Target::create_target(&self.target, db).await.unwrap()
         };
         let target_id = target.id;
-        #[cfg(feature="pbs")]
+        #[cfg(feature = "pbs")]
         {
             let srv = Server::new();
             let status = srv.stat_host(&None, None).unwrap();
             for t in to_offline(&self.target, status, self.to_offline).into_iter() {
-                let _ = srv.offline_vnode(&t, Some(&format!("{} sibling", &t))).unwrap();
-                let mut sib: target::ActiveModel = Target::find_by_name(&t).one(db).await.unwrap().unwrap().into();
+                srv.offline_vnode(&t, Some(&format!("{} sibling", &t)))
+                    .unwrap();
+                let mut sib: target::ActiveModel = Target::find_by_name(&t)
+                    .one(db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .into();
                 sib.status = ActiveValue::Set(TargetStatus::Draining);
                 sib.update(db).await.unwrap();
             }
-            if let Some(_) = self.to_offline {
+            if self.to_offline.is_some() {
                 let _ = srv.offline_vnode(&self.target, Some(&self.title));
                 let mut target: target::ActiveModel = target.into();
                 target.status = ActiveValue::Set(TargetStatus::Draining);
@@ -257,7 +289,7 @@ impl NewIssue {
             }
         }
 
-        let new_issue = issue::ActiveModel{
+        let new_issue = issue::ActiveModel {
             assigned_to: ActiveValue::Set(self.assigned_to.clone()),
             created_by: ActiveValue::Set(operator.to_string()),
             description: ActiveValue::Set(self.description.clone()),
@@ -280,7 +312,12 @@ impl NewIssue {
     }
 }
 
-async fn issue_close(cttissue: i32, operator: String, comment: String, db: &DatabaseConnection) -> Result<String, String> {
+async fn issue_close(
+    cttissue: i32,
+    operator: String,
+    comment: String,
+    db: &DatabaseConnection,
+) -> Result<String, String> {
     let issue = Issue::find_by_id(cttissue).one(db).await.unwrap().unwrap();
     let target_id = issue.target_id;
     if issue.issue_status == IssueStatus::Open {
@@ -295,7 +332,11 @@ async fn issue_close(cttissue: i32, operator: String, comment: String, db: &Data
             ..Default::default()
         };
         c.insert(db).await.unwrap();
-        let target = Target::find_by_id(target_id).one(db).await.unwrap().unwrap();
+        let target = Target::find_by_id(target_id)
+            .one(db)
+            .await
+            .unwrap()
+            .unwrap();
         check_blade(&target.name, db).await.unwrap();
     }
     Ok(format!("closed {}", cttissue))
@@ -305,27 +346,42 @@ pub struct Mutation;
 
 #[Object]
 impl Mutation {
-    
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Result<issue::Model, String> {
         let db = ctx.data::<DatabaseConnection>().unwrap();
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
-        let _ = tx.send(format!("{}: Opening issue for {}: {}", usr, issue.target, issue.title)).await;
+        let _ = tx
+            .send(format!(
+                "{}: Opening issue for {}: {}",
+                usr, issue.target, issue.title
+            ))
+            .await;
         issue.open(usr, db).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn close<'a>(&self, ctx: &Context<'a>, issue: i32, comment: String) -> Result<String, String> {
+    async fn close<'a>(
+        &self,
+        ctx: &Context<'a>,
+        issue: i32,
+        comment: String,
+    ) -> Result<String, String> {
         let usr: String = ctx.data_opt::<RoleGuard>().unwrap().user.clone();
         let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
-        let _ = tx.send(format!("{}: closing issue for {}: {}", usr, issue, comment)).await;
+        let _ = tx
+            .send(format!("{}: closing issue for {}: {}", usr, issue, comment))
+            .await;
         let db = ctx.data::<DatabaseConnection>().unwrap();
         issue_close(issue, usr, comment, db).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
-    async fn update_issue<'a>(&self, ctx: &Context<'a>, issue: UpdateIssue) -> Result<issue::Model, String> {
+    async fn update_issue<'a>(
+        &self,
+        ctx: &Context<'a>,
+        issue: UpdateIssue,
+    ) -> Result<issue::Model, String> {
         let usr: String = ctx.data_opt::<RoleGuard>().unwrap().user.clone();
         let db = ctx.data::<DatabaseConnection>().unwrap();
-        issue.update(&usr, &db).await
+        issue.update(&usr, db).await
     }
 }

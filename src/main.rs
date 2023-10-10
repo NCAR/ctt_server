@@ -1,11 +1,9 @@
 #![feature(let_chains)]
-mod setup;
-mod migrator;
-mod entities;
 mod cluster;
-use setup::setup_and_connect;
+mod entities;
+mod migrator;
+mod setup;
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
-use std::env;
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
 use axum::{
     error_handling::HandleErrorLayer,
@@ -18,8 +16,13 @@ use axum::{
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use http::StatusCode;
-#[cfg(feature="slack")]
-use slack_morphism::{prelude::SlackClientHyperConnector, SlackClient, SlackApiTokenValue, SlackApiToken, prelude::SlackApiChatPostMessageRequest, SlackMessageContent};
+use setup::setup_and_connect;
+#[cfg(feature = "slack")]
+use slack_morphism::{
+    prelude::SlackApiChatPostMessageRequest, prelude::SlackClientHyperConnector, SlackApiToken,
+    SlackApiTokenValue, SlackClient, SlackMessageContent,
+};
+use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -29,7 +32,7 @@ use tokio::time::sleep;
 use tower::ServiceBuilder;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 #[allow(unused_imports)]
-use tracing::{warn, info, Level};
+use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 mod auth;
 mod model;
@@ -49,7 +52,7 @@ async fn graphql_handler(
     resp.into()
 }
 
-#[cfg(not(feature="slack"))]
+#[cfg(not(feature = "slack"))]
 async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     let mut updates = vec![];
     while let Some(u) = rx.recv().await {
@@ -63,11 +66,12 @@ async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     }
 }
 
-#[cfg(feature="slack")]
+#[cfg(feature = "slack")]
 async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     let connector = SlackClientHyperConnector::new();
     let client = SlackClient::new(connector);
-    let token_value: SlackApiTokenValue = env::var("SLACK_TOKEN").expect("Missing SLACK_TOKEN").into();
+    let token_value: SlackApiTokenValue =
+        env::var("SLACK_TOKEN").expect("Missing SLACK_TOKEN").into();
     let token: SlackApiToken = SlackApiToken::new(token_value);
     let mut updates = vec![];
     while let Some(u) = rx.recv().await {
@@ -101,14 +105,13 @@ async fn schema_handler() -> impl IntoResponse {
 async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (StatusCode, String) {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        format!("request timed out"),
+        "request timed out".to_string(),
     )
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let subscriber = FmtSubscriber::builder()
-        .finish();
+    let subscriber = FmtSubscriber::builder().finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let db = setup_and_connect().await.unwrap();
