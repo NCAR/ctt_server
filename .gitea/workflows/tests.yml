@@ -1,0 +1,23 @@
+name: Check code
+
+on: 
+  push:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: host
+    steps:
+      - uses: actions/checkout@v4
+      - name: update toolchain
+        run: rustup update
+      - name: Test
+        run: cargo test
+      - name: Install Miri
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup override set nightly
+          cargo miri setup
+      - name: Test with Miri
+        run: cargo miri test

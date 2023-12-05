@@ -1,0 +1,23 @@
+name: Gitea Actions Demo
+run-name: pbs_cmds packaging
+on: 
+  push:
+    branches:
+      - main
+
+jobs:
+  NCAR rpm packaging:
+    runs-on: host
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - name: update toolchain
+        run: rustup update
+      - name: Compile
+        run: cargo build --release
+      - name: Strip
+        run: strip -s target/release/ctt_server
+      - name: Build rpm
+        run: cargo generate-rpm
+      - name: publish to gitea
+        run: curl --user shanks:${{ secrets.PACKAGING_TOKEN }} --upload-file target/generate-rpm/ctt_server-*.rpm https://git.hsg.ucar.edu/api/packages/shanks/rpm/upload

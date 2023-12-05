@@ -1,0 +1,37 @@
+name: Check Dependencies
+
+on: [push, pull_request]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: install munge
+        run: sudo apt install munge libmunge-dev -y
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: install rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly #needed for udeps
+          override: true
+      - name: install cargo-outdated
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-outdated
+      - name: run cargo-outdated
+        uses: actions-rs/cargo@v1
+        with:
+          command: outdated
+      - name: install cargo-udeps
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-udeps
+      - name: run cargo-udeps
+        uses: actions-rs/cargo@v1
+        with:
+          command: udeps
