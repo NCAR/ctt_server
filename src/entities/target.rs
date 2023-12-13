@@ -3,7 +3,7 @@
 use super::prelude::Issue;
 use async_graphql::*;
 use sea_orm::entity::prelude::*;
-use sea_orm::ActiveValue;
+use sea_orm::{ActiveValue, QueryOrder};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, SimpleObject)]
@@ -32,6 +32,9 @@ impl Related<super::issue::Entity> for Entity {
 impl ActiveModelBehavior for ActiveModel {}
 
 impl Entity {
+    pub fn all() -> Select<Entity> {
+        Self::find().order_by_asc(Column::Name)
+    }
     pub fn find_by_name(name: &str) -> Select<Entity> {
         Self::find().filter(Column::Name.eq(name))
     }
@@ -42,10 +45,14 @@ impl Entity {
         let issue = Issue::find_by_id(issue_id).one(db).await.unwrap().unwrap();
         Self::find_by_id(issue.target_id)
     }
-    pub async fn create_target(name: &str, db: &DatabaseConnection) -> Option<Model> {
+    pub async fn create_target(
+        name: &str,
+        state: TargetStatus,
+        db: &DatabaseConnection,
+    ) -> Option<Model> {
         let new_target = ActiveModel {
             name: ActiveValue::Set(name.to_string()),
-            status: ActiveValue::Set(TargetStatus::Online),
+            status: ActiveValue::Set(state),
             ..Default::default()
         };
         new_target.insert(db).await.ok()

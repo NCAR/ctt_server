@@ -1,0 +1,2 @@
+[build]
+rustflags = ["-L", "/opt/pbs/lib", "-C", "link-args=-Wl,-rpath,/opt/pbs/lib"]

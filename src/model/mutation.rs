@@ -37,70 +37,106 @@ impl UpdateIssue {
         }
         let issue = issue.unwrap();
         let mut updated_issue: issue::ActiveModel = issue.clone().into();
-        if let Some(_) = &self.assigned_to && self.assigned_to != issue.assigned_to {
+        if let Some(_) = &self.assigned_to
+            && self.assigned_to != issue.assigned_to
+        {
             updated_issue.assigned_to = ActiveValue::Set(self.assigned_to.clone());
             let c = comment::ActiveModel {
                 created_by: ActiveValue::Set(operator.to_string()),
-                comment: ActiveValue::Set(format!("Updating assigned_to from {:?} to {:?}", issue.assigned_to, self.assigned_to)),
+                comment: ActiveValue::Set(format!(
+                    "Updating assigned_to from {:?} to {:?}",
+                    issue.assigned_to, self.assigned_to
+                )),
                 issue_id: ActiveValue::Set(issue.id),
                 ..Default::default()
             };
             c.insert(db).await.unwrap();
         }
-        if let Some(d) = self.description.clone() && d != issue.description {
+        if let Some(d) = self.description.clone()
+            && d != issue.description
+        {
             updated_issue.description = ActiveValue::Set(d.clone());
             let c = comment::ActiveModel {
                 created_by: ActiveValue::Set(operator.to_string()),
-                comment: ActiveValue::Set(format!("Updating description from {:?} to {:?}", issue.description, d)),
+                comment: ActiveValue::Set(format!(
+                    "Updating description from {:?} to {:?}",
+                    issue.description, d
+                )),
                 issue_id: ActiveValue::Set(issue.id),
                 ..Default::default()
             };
             c.insert(db).await.unwrap();
         }
-        if let Some(t) = self.title.clone() && t != issue.title {
+        if let Some(t) = self.title.clone()
+            && t != issue.title
+        {
             updated_issue.title = ActiveValue::Set(t.to_string());
             let c = comment::ActiveModel {
                 created_by: ActiveValue::Set(operator.to_string()),
-                comment: ActiveValue::Set(format!("Updating title from {:?} to {:?}", issue.title, t)),
+                comment: ActiveValue::Set(format!(
+                    "Updating title from {:?} to {:?}",
+                    issue.title, t
+                )),
                 issue_id: ActiveValue::Set(issue.id),
                 ..Default::default()
             };
             c.insert(db).await.unwrap();
         }
-        if let Some(_) = self.to_offline && self.to_offline != issue.to_offline {
+        if let Some(_) = self.to_offline
+            && self.to_offline != issue.to_offline
+        {
             updated_issue.to_offline = ActiveValue::Set(self.to_offline);
             let c = comment::ActiveModel {
                 created_by: ActiveValue::Set(operator.to_string()),
-                comment: ActiveValue::Set(format!("Updating to_offline from {:?} to {:?}", issue.to_offline, self.to_offline)),
+                comment: ActiveValue::Set(format!(
+                    "Updating to_offline from {:?} to {:?}",
+                    issue.to_offline, self.to_offline
+                )),
                 issue_id: ActiveValue::Set(issue.id),
                 ..Default::default()
             };
             c.insert(db).await.unwrap();
-        #[cfg(feature="pbs")]
+            #[cfg(feature = "pbs")]
+            {
+                let srv = Server::new();
+                let status = srv.stat_host(&None, None).unwrap();
+                let target = Target::find_by_issue_id(self.id, db)
+                    .await
+                    .one(db)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                for t in to_offline(&target.name, status, self.to_offline).into_iter() {
+                    srv.offline_vnode(&t, Some(&format!("{} sibling", &t)))
+                        .unwrap();
+                    let mut sib: target::ActiveModel = Target::find_by_name(&t)
+                        .one(db)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .into();
+                    sib.status = ActiveValue::Set(TargetStatus::Draining);
+                    sib.update(db).await.unwrap();
+                }
+                //TODO only try offlining if it isn't draining already
+                if self.to_offline.is_some() {
+                    let _ = srv.offline_vnode(&target.name, Some(&issue.title));
+                    let mut t: target::ActiveModel = target.into();
+                    t.status = ActiveValue::Set(TargetStatus::Draining);
+                    t.update(db).await.unwrap();
+                }
+            }
+        }
+        if let Some(e) = self.enforce_down
+            && e != issue.enforce_down
         {
-            let srv = Server::new();
-            let status = srv.stat_host(&None, None).unwrap();
-            let target = Target::find_by_issue_id(self.id, db).await.one(db).await.unwrap().unwrap();
-            for t in to_offline(&target.name, status, self.to_offline).into_iter() {
-                srv.offline_vnode(&t, Some(&format!("{} sibling", &t))).unwrap();
-                let mut sib: target::ActiveModel = Target::find_by_name(&t).one(db).await.unwrap().unwrap().into();
-                sib.status = ActiveValue::Set(TargetStatus::Draining);
-                sib.update(db).await.unwrap();
-            }
-            //TODO only try offlining if it isn't draining already
-            if self.to_offline.is_some() {
-                let _ = srv.offline_vnode(&target.name, Some(&issue.title));
-                let mut t: target::ActiveModel = target.into();
-                t.status = ActiveValue::Set(TargetStatus::Draining);
-                t.update(db).await.unwrap();
-            }
-        }
-        }
-        if let Some(e) = self.enforce_down && e != issue.enforce_down {
             updated_issue.enforce_down = ActiveValue::Set(e);
             let c = comment::ActiveModel {
                 created_by: ActiveValue::Set(operator.to_string()),
-                comment: ActiveValue::Set(format!("Updating enforce_down from {:?} to {:?}", issue.enforce_down, e)),
+                comment: ActiveValue::Set(format!(
+                    "Updating enforce_down from {:?} to {:?}",
+                    issue.enforce_down, e
+                )),
                 issue_id: ActiveValue::Set(issue.id),
                 ..Default::default()
             };
@@ -262,7 +298,9 @@ impl NewIssue {
             t
         } else {
             warn!("Target not found, creating {}", self.target);
-            Target::create_target(&self.target, db).await.unwrap()
+            Target::create_target(&self.target, TargetStatus::Unknown, db)
+                .await
+                .unwrap()
         };
         let target_id = target.id;
         #[cfg(feature = "pbs")]

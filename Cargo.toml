@@ -34,7 +34,7 @@ sea-orm-migration = "0.12"
 pbs = { version = "0.0.5", optional = true }
 
 [features]
-default = ["pbs", "slack", "auth"]
+default = ["pbs", "slack", "auth", "gust"]
 slack = ["slack-morphism"]
 auth = []
 gust = []
