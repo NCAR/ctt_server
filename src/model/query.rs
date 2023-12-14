@@ -25,8 +25,8 @@ impl Query {
         let db = ctx.data::<DatabaseConnection>().unwrap();
         let mut select = target::Entity::find().find_with_related(issue::Entity);
         if let Some(status) = issue_status {
-            select = select
-                .filter(<issue::Entity as sea_orm::EntityTrait>::Column::IssueStatus.eq(status));
+            select =
+                select.filter(<issue::Entity as sea_orm::EntityTrait>::Column::Status.eq(status));
         }
         if let Some(t) = target {
             select = select.filter(<target::Entity as sea_orm::EntityTrait>::Column::Name.eq(t));

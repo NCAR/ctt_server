@@ -26,6 +26,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: outdated
+          args: --root-deps-only
       - name: install cargo-udeps
         uses: actions-rs/cargo@v1
         with:

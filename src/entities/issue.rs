@@ -10,13 +10,14 @@ use tracing::warn;
 pub struct Model {
     pub assigned_to: Option<String>,
     pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime,
     pub created_by: String,
     pub description: String,
     pub to_offline: Option<ToOffline>,
     pub enforce_down: bool,
     #[sea_orm(primary_key, auto_increment = true)]
     pub id: i32,
-    pub issue_status: IssueStatus,
+    pub status: IssueStatus,
     #[graphql(skip)]
     pub target_id: i32,
     pub title: String,
@@ -121,9 +122,9 @@ pub enum IssueStatus {
 #[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "to_offline")]
 pub enum ToOffline {
     #[sea_orm(string_value = "Node")]
-    Target,
-    #[sea_orm(string_value = "Sibling")]
-    Siblings,
-    #[sea_orm(string_value = "Cousin")]
-    Cousins,
+    Node,
+    #[sea_orm(string_value = "Card")]
+    Card,
+    #[sea_orm(string_value = "Blade")]
+    Blade,
 }

@@ -50,7 +50,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Issue::Title).string().not_null())
                     .col(ColumnDef::new(Issue::Description).string().not_null())
                     .col(
-                        ColumnDef::new(Issue::IssueStatus)
+                        ColumnDef::new(Issue::Status)
                             .enumeration(IssueStatus::Table, IssueStatus::iter().skip(1))
                             .not_null(),
                     )
@@ -67,7 +67,13 @@ impl MigrationTrait for Migration {
                             .default(Expr::current_timestamp())
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Issue::EnforceDown).boolean().not_null())
+                    .col(
+                        //TODO make auto update to now() on row updates
+                        ColumnDef::new(Issue::UpdatedAt)
+                            .date_time()
+                            .default(Expr::current_timestamp())
+                            .not_null(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("target")
@@ -132,14 +138,13 @@ enum Issue {
     Id,
     Title,
     Description,
-    #[allow(clippy::enum_variant_names)]
-    IssueStatus,
+    Status,
     TargetId,
     ToOffline,
     AssignedTo,
     CreatedBy,
     CreatedAt,
-    EnforceDown,
+    UpdatedAt,
 }
 
 #[derive(DeriveIden)]
@@ -169,11 +174,12 @@ enum IssueStatus {
 }
 
 #[derive(Iden, EnumIter)]
+//if null means don't enforce offlining
 enum ToOffline {
     Table,
-    Target,
-    Siblings,
-    Cousins,
+    Node,
+    Card,
+    Blade,
 }
 
 #[derive(Iden, EnumIter)]

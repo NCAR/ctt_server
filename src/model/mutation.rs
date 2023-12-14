@@ -152,7 +152,6 @@ pub struct NewIssue {
     assigned_to: Option<String>,
     description: String,
     to_offline: Option<issue::ToOffline>,
-    enforce_down: Option<bool>,
     target: String,
     title: String,
 }
@@ -234,13 +233,13 @@ async fn check_blade(target: &str, db: &DatabaseConnection) -> Result<(), ()> {
                     .await
                     .unwrap()
                     .issues()
-                    .filter(issue::Column::IssueStatus.eq(IssueStatus::Open))
+                    .filter(issue::Column::Status.eq(IssueStatus::Open))
                     .all(db)
                     .await
                     .unwrap()
                 {
                     let mut i: issue::ActiveModel = issue.into();
-                    i.issue_status = ActiveValue::Set(IssueStatus::Closed);
+                    i.status = ActiveValue::Set(IssueStatus::Closed);
                     i.update(db).await.unwrap();
                     //TODO add comment found node online, closing ticket
                 }
@@ -257,9 +256,9 @@ async fn check_blade(target: &str, db: &DatabaseConnection) -> Result<(), ()> {
 fn node_group(target: &str, group: Option<issue::ToOffline>) -> Vec<String> {
     match group {
         None => vec![],
-        Some(issue::ToOffline::Cousins) => Cluster::cousins(target),
-        Some(issue::ToOffline::Siblings) => Cluster::siblings(target),
-        Some(issue::ToOffline::Target) => {
+        Some(issue::ToOffline::Blade) => Cluster::cousins(target),
+        Some(issue::ToOffline::Card) => Cluster::siblings(target),
+        Some(issue::ToOffline::Node) => {
             vec![]
         }
     }
@@ -283,12 +282,31 @@ fn to_offline(target: &str, status: pbs::StatResp, group: Option<issue::ToOfflin
 }
 
 impl NewIssue {
-    async fn open(&self, operator: &str, db: &DatabaseConnection) -> Result<issue::Model, String> {
+    pub fn new(
+        assigned_to: Option<String>,
+        description: String,
+        title: String,
+        target: String,
+        to_offline: Option<issue::ToOffline>,
+    ) -> Self {
+        Self {
+            assigned_to,
+            description,
+            to_offline,
+            target,
+            title,
+        }
+    }
+    pub async fn open(
+        &self,
+        operator: &str,
+        db: &DatabaseConnection,
+    ) -> Result<issue::Model, String> {
         if let Some(i) = Target::from_name(&self.target, db)
             .await
             .unwrap()
             .issues()
-            .filter(issue::Column::IssueStatus.eq(IssueStatus::Open))
+            .filter(issue::Column::Status.eq(IssueStatus::Open))
             .filter(issue::Column::Title.eq(&self.title))
             .one(db)
             .await
@@ -329,8 +347,7 @@ impl NewIssue {
             created_by: ActiveValue::Set(operator.to_string()),
             description: ActiveValue::Set(self.description.clone()),
             to_offline: ActiveValue::Set(self.to_offline),
-            enforce_down: ActiveValue::Set(self.enforce_down.unwrap_or(false)),
-            issue_status: ActiveValue::Set(IssueStatus::Open),
+            status: ActiveValue::Set(IssueStatus::Open),
             target_id: ActiveValue::Set(target_id),
             title: ActiveValue::Set(self.title.clone()),
             ..Default::default()
@@ -355,10 +372,10 @@ async fn issue_close(
 ) -> Result<String, String> {
     let issue = Issue::find_by_id(cttissue).one(db).await.unwrap().unwrap();
     let target_id = issue.target_id;
-    if issue.issue_status == IssueStatus::Open {
+    if issue.status == IssueStatus::Open {
         let mut issue: issue::ActiveModel = issue.into();
-        issue.issue_status = ActiveValue::Set(IssueStatus::Closed);
-        issue.reset(issue::Column::IssueStatus);
+        issue.status = ActiveValue::Set(IssueStatus::Closed);
+        issue.reset(issue::Column::Status);
         issue.update(db).await.unwrap();
         let c = comment::ActiveModel {
             created_by: ActiveValue::Set(operator.clone()),
