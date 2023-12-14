@@ -102,62 +102,54 @@ pub async fn pbs_sync(db: DatabaseConnection) {
             let pbs_state = pbs_node_state.get(target);
             if let Some(new_state) = pbs_state {
                 match old_state {
-                    TargetStatus::Draining => {
-                        match new_state {
-                            TargetStatus::Draining => continue,
-                            TargetStatus::Down => {
-                                todo!();
-                            },
-                            TargetStatus::Offline => {
-                                todo!();
-                            },
-                            TargetStatus::Online => {
-                                todo!();
-                            },
+                    TargetStatus::Draining => match new_state {
+                        TargetStatus::Draining => continue,
+                        TargetStatus::Down => {
+                            todo!();
                         }
-                    }
-                    TargetStatus::Down => {
-                        match new_state {
-                            TargetStatus::Down => continue,
-                            TargetStatus::Draining => {
-                                todo!();
-                            },
-                            TargetStatus::Offline => {
-                                todo!();
-                            },
-                            TargetStatus::Online => {
-                                todo!();
-                            },
+                        TargetStatus::Offline => {
+                            todo!();
                         }
-                    }
-                    TargetStatus::Offline => {
-                        match new_state {
-                            TargetStatus::Offline => continue,
-                            TargetStatus::Draining => {
-                                todo!();
-                            },
-                            TargetStatus::Down => {
-                                todo!();
-                            },
-                            TargetStatus::Online => {
-                                todo!();
-                            },
+                        TargetStatus::Online => {
+                            todo!();
                         }
-                    }
-                    TargetStatus::Online => {
-                        match new_state {
-                            TargetStatus::Online => continue,
-                            TargetStatus::Draining => {
-                                todo!();
-                            },
-                            TargetStatus::Down => {
-                                todo!();
-                            },
-                            TargetStatus::Offline => {
-                                todo!();
-                            },
+                    },
+                    TargetStatus::Down => match new_state {
+                        TargetStatus::Down => continue,
+                        TargetStatus::Draining => {
+                            todo!();
                         }
-                    }
+                        TargetStatus::Offline => {
+                            todo!();
+                        }
+                        TargetStatus::Online => {
+                            todo!();
+                        }
+                    },
+                    TargetStatus::Offline => match new_state {
+                        TargetStatus::Offline => continue,
+                        TargetStatus::Draining => {
+                            todo!();
+                        }
+                        TargetStatus::Down => {
+                            todo!();
+                        }
+                        TargetStatus::Online => {
+                            todo!();
+                        }
+                    },
+                    TargetStatus::Online => match new_state {
+                        TargetStatus::Online => continue,
+                        TargetStatus::Draining => {
+                            todo!();
+                        }
+                        TargetStatus::Down => {
+                            todo!();
+                        }
+                        TargetStatus::Offline => {
+                            todo!();
+                        }
+                    },
                 }
                 // TODO update node state
                 //   be careful of enforce_down edge case

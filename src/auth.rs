@@ -1,5 +1,5 @@
 use async_graphql::{Context, Guard, Result};
-use axum::body::BoxBody;
+use axum::body::Body;
 use axum::extract;
 #[cfg(feature = "auth")]
 use axum::http::header;
@@ -28,7 +28,7 @@ lazy_static! {
 pub struct Auth;
 
 impl<B> ValidateRequest<B> for Auth {
-    type ResponseBody = axum::body::BoxBody;
+    type ResponseBody = Body;
 
     fn validate(
         &mut self,
@@ -45,7 +45,7 @@ impl<B> ValidateRequest<B> for Auth {
             let unauthorized_response: axum::response::Response =
                 axum::response::Response::builder()
                     .status(StatusCode::UNAUTHORIZED)
-                    .body(BoxBody::default())
+                    .body(Body::default())
                     .unwrap();
             info!("Invalid request");
 
