@@ -10,6 +10,7 @@ use async_graphql::{Context, InputObject, Object, Result};
 #[cfg(feature = "pbs")]
 use pbs::Server;
 use sea_orm::entity::ActiveValue;
+use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, QueryFilter};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -26,11 +27,8 @@ pub struct UpdateIssue {
 }
 
 impl UpdateIssue {
-    async fn update(
-        &self,
-        operator: &str,
-        db: &DatabaseConnection,
-    ) -> Result<issue::Model, String> {
+    async fn update(&self, operator: &str, ctx: &Context<'_>) -> Result<issue::Model, String> {
+        let db = ctx.data::<DatabaseConnection>().unwrap();
         let issue = Issue::find_by_id(self.id).one(db).await.unwrap();
         if issue.is_none() {
             return Err(format!("Issue {} not found", self.id));
@@ -100,21 +98,12 @@ impl UpdateIssue {
             {
                 let srv = Server::new();
                 let status = srv.stat_host(&None, None).unwrap();
-                let target = Target::find_by_issue_id(self.id, db)
-                    .await
-                    .one(db)
-                    .await
-                    .unwrap()
-                    .unwrap();
+                let target = issue.target(ctx).await.unwrap().unwrap();
                 for t in to_offline(&target.name, status, self.to_offline).into_iter() {
                     srv.offline_vnode(&t, Some(&format!("{} sibling", &t)))
                         .unwrap();
-                    let mut sib: target::ActiveModel = Target::find_by_name(&t)
-                        .one(db)
-                        .await
-                        .unwrap()
-                        .unwrap()
-                        .into();
+                    let mut sib: target::ActiveModel =
+                        Target::from_name(&t, db).await.unwrap().into();
                     sib.status = ActiveValue::Set(TargetStatus::Draining);
                     sib.update(db).await.unwrap();
                 }
@@ -205,7 +194,13 @@ async fn check_blade(target: &str, db: &DatabaseConnection) -> Result<(), ()> {
         .map(|t| (t, (TargetStatus::Online, false)))
         .collect();
     for node in Cluster::cousins(target) {
-        if let Ok(issues) = Issue::find_by_target_name(&node, db).await.all(db).await {
+        if let Ok(issues) = Target::from_name(&node, db)
+            .await
+            .unwrap()
+            .issues()
+            .all(db)
+            .await
+        {
             for i in issues {
                 for n in node_group(&node, i.to_offline) {
                     expected_status.insert(
@@ -235,8 +230,10 @@ async fn check_blade(target: &str, db: &DatabaseConnection) -> Result<(), ()> {
             } else {
                 // node is expected to be offline, and no enforce flag
                 // assume it is fixed and close any open issues on the target
-                for issue in Issue::find_by_target_name(&node, db)
+                for issue in Target::from_name(&node, db)
                     .await
+                    .unwrap()
+                    .issues()
                     .filter(issue::Column::IssueStatus.eq(IssueStatus::Open))
                     .all(db)
                     .await
@@ -247,12 +244,8 @@ async fn check_blade(target: &str, db: &DatabaseConnection) -> Result<(), ()> {
                     i.update(db).await.unwrap();
                     //TODO add comment found node online, closing ticket
                 }
-                let mut target: target::ActiveModel = Target::find_by_name(&node)
-                    .one(db)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .into();
+                let mut target: target::ActiveModel =
+                    Target::from_name(&node, db).await.unwrap().into();
                 target.status = ActiveValue::Set(TargetStatus::Online);
                 target.update(db).await.unwrap();
             }
@@ -291,14 +284,23 @@ fn to_offline(target: &str, status: pbs::StatResp, group: Option<issue::ToOfflin
 
 impl NewIssue {
     async fn open(&self, operator: &str, db: &DatabaseConnection) -> Result<issue::Model, String> {
-        if let Some(i) = Issue::already_open(&self.target, &self.title, db).await {
+        if let Some(i) = Target::from_name(&self.target, db)
+            .await
+            .unwrap()
+            .issues()
+            .filter(issue::Column::IssueStatus.eq(IssueStatus::Open))
+            .filter(issue::Column::Title.eq(&self.title))
+            .one(db)
+            .await
+            .unwrap()
+        {
             return Ok(i);
         }
-        let target = if let Some(t) = Target::find_by_name(&self.target).one(db).await.unwrap() {
+        let target = if let Some(t) = Target::from_name(&self.target, db).await {
             t
         } else {
             warn!("Target not found, creating {}", self.target);
-            Target::create_target(&self.target, TargetStatus::Unknown, db)
+            Target::create_target(&self.target, TargetStatus::Online, db)
                 .await
                 .unwrap()
         };
@@ -310,12 +312,7 @@ impl NewIssue {
             for t in to_offline(&self.target, status, self.to_offline).into_iter() {
                 srv.offline_vnode(&t, Some(&format!("{} sibling", &t)))
                     .unwrap();
-                let mut sib: target::ActiveModel = Target::find_by_name(&t)
-                    .one(db)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .into();
+                let mut sib: target::ActiveModel = Target::from_name(&t, db).await.unwrap().into();
                 sib.status = ActiveValue::Set(TargetStatus::Draining);
                 sib.update(db).await.unwrap();
             }
@@ -419,7 +416,6 @@ impl Mutation {
         issue: UpdateIssue,
     ) -> Result<issue::Model, String> {
         let usr: String = ctx.data_opt::<RoleGuard>().unwrap().user.clone();
-        let db = ctx.data::<DatabaseConnection>().unwrap();
-        issue.update(&usr, db).await
+        issue.update(&usr, ctx).await
     }
 }

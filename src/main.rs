@@ -1,9 +1,8 @@
 #![feature(let_chains)]
 mod cluster;
-use std::collections::HashMap;
 mod entities;
-use entities::target::TargetStatus;
 mod migrator;
+mod pbs_sync;
 mod setup;
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
@@ -18,7 +17,6 @@ use axum::{
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use http::StatusCode;
-use pbs::{Attrl, Op};
 use setup::setup_and_connect;
 #[cfg(feature = "slack")]
 use slack_morphism::{
@@ -31,7 +29,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tokio::signal;
 use tokio::sync::mpsc;
-use tokio::time::{self, sleep};
+use tokio::time::sleep;
 use tower::ServiceBuilder;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 #[allow(unused_imports)]
@@ -39,7 +37,6 @@ use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 mod auth;
 mod model;
-use sea_orm::{DatabaseConnection, QuerySelect};
 
 async fn graphql_handler(
     schema: Extension<model::CttSchema>,
@@ -139,7 +136,7 @@ async fn main() {
 
     let handle = Handle::new();
     tokio::spawn(graceful_shutdown(handle.clone()));
-    tokio::spawn(pbs_sync(db));
+    tokio::spawn(pbs_sync::pbs_sync(db));
 
     let app = Router::new()
         .route("/", get(graphiql))
@@ -168,84 +165,6 @@ async fn main() {
         .serve(app.into_make_service())
         .await
         .unwrap();
-}
-
-async fn pbs_sync(db: DatabaseConnection) {
-    //TODO get interval from config file
-    let mut interval = time::interval(Duration::from_secs(30));
-    // don't let ticks stack up if a sync takes longer than interval
-    interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
-    loop {
-        let pbs_srv = pbs::Server::new();
-        //TODO filter stat attribs (just need hostname, jobs, and state)
-        //TODO need to handle err
-        let _pbs_node_state: HashMap<String, TargetStatus> = pbs_srv
-            .stat_vnode(&None, None)
-            .unwrap()
-            .resources
-            .iter()
-            .map(|n| {
-                let name = n.name();
-                let jobs = match n.attribs().get("jobs").unwrap() {
-                    Attrl::Value(Op::Default(j)) => j.is_empty(),
-                    x => {
-                        println!("{:?}", x);
-                        panic!("bad job list");
-                    }
-                };
-                let state = match n.attribs().get("state").unwrap() {
-                    Attrl::Value(Op::Default(j)) => j,
-                    x => {
-                        println!("{:?}", x);
-                        panic!("bad state");
-                    }
-                };
-                let state = match state.as_str() {
-                    x if x.contains("unknown") => TargetStatus::Unknown,
-                    //job-excl or resv-excl
-                    x if x.contains("exclusive") => TargetStatus::Online,
-                    //order matters, before "down" to capture down,offline nodes
-                    x if x.contains("offline") => {
-                        if jobs {
-                            TargetStatus::Draining
-                        } else {
-                            TargetStatus::Offline
-                        }
-                    }
-                    "down" => {
-                        if jobs {
-                            TargetStatus::Draining
-                        } else {
-                            TargetStatus::Down
-                        }
-                    }
-                    "job-busy" => TargetStatus::Online,
-                    "free" => TargetStatus::Online,
-                    x => {
-                        warn!("Unrecognized node state, '{}'", x);
-                        TargetStatus::Unknown
-                    }
-                };
-                (name, state)
-            })
-            .collect();
-        let ctt_node_state = entities::target::Entity::all()
-            .select_only()
-            .columns([
-                entities::target::Column::Name,
-                entities::target::Column::Status,
-            ])
-            .all(&db)
-            .await
-            .unwrap();
-        let _ctt_node_state: HashMap<String, TargetStatus> = ctt_node_state
-            .iter()
-            .map(|n| (n.name.clone(), n.status))
-            .collect();
-        // sync ctt and pbs
-
-        interval.tick().await;
-    }
 }
 
 async fn graceful_shutdown(handle: Handle) {

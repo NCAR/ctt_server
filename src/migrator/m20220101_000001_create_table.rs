@@ -132,6 +132,7 @@ enum Issue {
     Id,
     Title,
     Description,
+    #[allow(clippy::enum_variant_names)]
     IssueStatus,
     TargetId,
     ToOffline,
@@ -156,6 +157,7 @@ enum Comment {
     IssueId,
     CreatedAt,
     CreatedBy,
+    #[allow(clippy::enum_variant_names)]
     Comment,
 }
 
@@ -181,5 +183,4 @@ enum TargetStatus {
     Draining,
     Offline,
     Down,
-    Unknown,
 }
