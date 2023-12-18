@@ -22,7 +22,7 @@ http = "1"
 http-body = "1"
 jsonwebtoken = "9"
 lazy_static = "1"
-munge_auth = "0.1"
+munge_auth = "0.1.1"
 pbs = { version = "0.0.5", optional = true }
 rand = "0.8"
 sea-orm = { version="0.12", features = ["with-chrono", "sqlx-sqlite", "runtime-tokio-rustls", "macros"]}
