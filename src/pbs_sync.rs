@@ -4,6 +4,7 @@ use crate::cluster::Gust as Cluster;
 use crate::entities;
 use crate::entities::issue::IssueStatus;
 use crate::entities::issue::ToOffline;
+use crate::entities::prelude::Target;
 use crate::entities::target::TargetStatus;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, QuerySelect};
 use std::collections::HashMap;
@@ -17,7 +18,7 @@ use tracing::{info, warn, Level};
 
 pub async fn pbs_sync(db: DatabaseConnection) {
     //TODO get interval from config file
-    let mut interval = time::interval(Duration::from_secs(30));
+    let mut interval = time::interval(Duration::from_secs(60*5));
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
@@ -56,7 +57,7 @@ pub async fn pbs_sync(db: DatabaseConnection) {
     }
 }
 
-async fn get_pbs_nodes(pbs_srv: &pbs::Server) -> HashMap<String, TargetStatus> {
+pub async fn get_pbs_nodes(pbs_srv: &pbs::Server) -> HashMap<String, TargetStatus> {
     //TODO filter stat attribs (just need hostname, jobs, and state)
     //TODO need to handle err
     //TODO consider calling pbs_srv.stat_vnode from a spawn_blocking task
@@ -93,7 +94,7 @@ async fn get_pbs_nodes(pbs_srv: &pbs::Server) -> HashMap<String, TargetStatus> {
                         TargetStatus::Offline
                     }
                 }
-                "down" => {
+                x if x.contains("down") => {
                     if jobs {
                         TargetStatus::Draining
                     } else {
@@ -118,12 +119,13 @@ async fn get_pbs_nodes(pbs_srv: &pbs::Server) -> HashMap<String, TargetStatus> {
         .collect()
 }
 
-async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetStatus> {
+pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetStatus> {
     let ctt_node_state = entities::target::Entity::all()
         .select_only()
         .columns([
             entities::target::Column::Name,
             entities::target::Column::Status,
+            entities::target::Column::Id,
         ])
         .all(db)
         .await
@@ -134,9 +136,18 @@ async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetStatus>
         .collect()
 }
 
-async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStatus, String) {
+pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStatus, String) {
     for c in Cluster::cousins(target) {
-        let t = entities::target::Entity::from_name(&c, db).await.unwrap();
+        let t = entities::target::Entity::from_name(&c, db).await;
+        let t = if let Some(tmp) = t {
+            tmp
+        } else {
+            //TODO check if t is a valid node
+            //if not give a warning and return (TargetStatus::Offline, "Invalid node")
+            Target::create_target(target, TargetStatus::Online, db)
+                .await
+                .unwrap()
+        };
         if t.issues()
             .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
             .filter(entities::issue::Column::ToOffline.eq(ToOffline::Blade))
@@ -186,7 +197,7 @@ async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStatus, 
     (TargetStatus::Online, "todo".to_string())
 }
 
-async fn close_open_issues(target: &str, db: &DatabaseConnection) {
+pub async fn close_open_issues(target: &str, db: &DatabaseConnection) {
     for issue in entities::target::Entity::from_name(target, db)
         .await
         .unwrap()

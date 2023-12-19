@@ -3,7 +3,7 @@ use crate::entities::issue;
 use crate::entities::prelude::*;
 use crate::entities::target;
 use async_graphql::{Context, Object};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 
 pub struct Query;
 
@@ -32,6 +32,7 @@ impl Query {
             select = select.filter(<target::Entity as sea_orm::EntityTrait>::Column::Name.eq(t));
         }
         select
+            .order_by_asc(crate::entities::target::Column::Name)
             .all(db)
             .await
             .unwrap()
@@ -41,6 +42,6 @@ impl Query {
                 acc.append(&mut c);
                 acc
             })
-            .unwrap()
+            .unwrap_or(vec![])
     }
 }
