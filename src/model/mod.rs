@@ -1,5 +1,5 @@
 use async_graphql::{EmptySubscription, Schema};
-mod mutation;
+pub mod mutation;
 mod query;
 pub use mutation::{Mutation, NewIssue};
 pub use query::Query;

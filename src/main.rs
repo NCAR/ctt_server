@@ -33,8 +33,9 @@ use tokio::time::sleep;
 use tower::ServiceBuilder;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 #[allow(unused_imports)]
-use tracing::{info, warn, Level};
-use tracing_subscriber::FmtSubscriber;
+use tracing::{info, instrument, warn, Level};
+use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+use tracing_subscriber::{filter::Targets, fmt, Layer};
 mod auth;
 mod model;
 
@@ -54,6 +55,7 @@ async fn graphql_handler(
 }
 
 #[cfg(not(feature = "slack"))]
+#[instrument]
 async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     let mut updates = vec![];
     while let Some(u) = rx.recv().await {
@@ -68,6 +70,7 @@ async fn slack_updater(mut rx: mpsc::Receiver<String>) {
 }
 
 #[cfg(feature = "slack")]
+#[instrument]
 async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     let connector = SlackClientHyperConnector::new();
     let client = SlackClient::new(connector);
@@ -83,7 +86,8 @@ async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     }
     let session = client.open_session(&token);
 
-    // Send a simple text messagele
+    // Send a simple text message
+    // TODO get channel name from config file
     let post_chat_req = SlackApiChatPostMessageRequest::new(
         "#shanks-test".into(),
         SlackMessageContent::new().with_text(format!("{:?}", updates)),
@@ -94,15 +98,18 @@ async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     };
 }
 
+#[instrument]
 async fn graphiql() -> impl IntoResponse {
     response::Html(GraphiQLSource::build().endpoint("/api").finish())
 }
 
+#[instrument]
 async fn schema_handler() -> impl IntoResponse {
     let schema = Schema::new(model::Query, model::Mutation, EmptySubscription);
     schema.sdl()
 }
 
+#[instrument]
 async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (StatusCode, String) {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -112,8 +119,15 @@ async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (St
 
 #[tokio::main]
 async fn main() {
-    let subscriber = FmtSubscriber::builder().finish();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    let stdout_log = fmt::layer().pretty();
+    tracing_subscriber::registry().with(
+        stdout_log.with_filter(
+            Targets::default()
+                .with_target("ctt_server", Level::TRACE)
+                .with_target("sqlx::query", Level::WARN)
+                .with_default(Level::INFO),
+        ),
+    );
 
     let db = setup_and_connect().await.unwrap();
 

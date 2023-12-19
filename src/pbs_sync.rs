@@ -6,22 +6,26 @@ use crate::entities::issue::IssueStatus;
 use crate::entities::issue::ToOffline;
 use crate::entities::prelude::Target;
 use crate::entities::target::TargetStatus;
+use crate::model::mutation;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, QuerySelect};
 use std::collections::HashMap;
+use tokio::sync::mpsc;
 
 use pbs::{Attrl, Op};
 use sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::time;
-#[allow(unused_imports)]
-use tracing::{info, warn, Level};
+use tracing::{instrument, warn};
 
+#[instrument]
 pub async fn pbs_sync(db: DatabaseConnection) {
     //TODO get interval from config file
-    let mut interval = time::interval(Duration::from_secs(60*5));
+    let mut interval = time::interval(Duration::from_secs(60 * 5));
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
+        let (tx, rx) = mpsc::channel(5);
+        tokio::spawn(crate::slack_updater(rx));
         let pbs_srv = pbs::Server::new();
         let pbs_node_state = get_pbs_nodes(&pbs_srv).await;
         let mut ctt_node_state = get_ctt_nodes(&db).await;
@@ -40,7 +44,7 @@ pub async fn pbs_sync(db: DatabaseConnection) {
         for (target, old_state) in &ctt_node_state {
             let pbs_state = pbs_node_state.get(target);
             if let Some(new_state) = pbs_state {
-                handle_transition(target, old_state, new_state, &pbs_srv, &db).await;
+                handle_transition(target, old_state, new_state, &pbs_srv, &db, &tx).await;
             } else {
                 warn!("{} not found in pbs", target);
                 let new_issue = crate::model::NewIssue::new(
@@ -50,7 +54,13 @@ pub async fn pbs_sync(db: DatabaseConnection) {
                     target.to_string(),
                     None,
                 );
-                new_issue.open("ctt", &db).await.unwrap();
+                //TODO need to add a way to delete a node from ctt
+                mutation::issue_open(&new_issue, "ctt", &db, &tx)
+                    .await
+                    .unwrap();
+                let _ = tx
+                    .send(format!("New issue for {}: Node not found in pbs", target))
+                    .await;
             }
         }
         interval.tick().await;
@@ -119,6 +129,7 @@ pub async fn get_pbs_nodes(pbs_srv: &pbs::Server) -> HashMap<String, TargetStatu
         .collect()
 }
 
+#[instrument]
 pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetStatus> {
     let ctt_node_state = entities::target::Entity::all()
         .select_only()
@@ -136,6 +147,7 @@ pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetSta
         .collect()
 }
 
+#[instrument]
 pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStatus, String) {
     for c in Cluster::cousins(target) {
         let t = entities::target::Entity::from_name(&c, db).await;
@@ -197,6 +209,7 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
     (TargetStatus::Online, "todo".to_string())
 }
 
+#[instrument]
 pub async fn close_open_issues(target: &str, db: &DatabaseConnection) {
     for issue in entities::target::Entity::from_name(target, db)
         .await
@@ -227,6 +240,7 @@ async fn handle_transition(
     new_state: &TargetStatus,
     pbs_srv: &pbs::Server,
     db: &DatabaseConnection,
+    tx: &mpsc::Sender<String>,
 ) {
     let (expected_state, comment) = desired_state(target, db).await;
 
@@ -242,11 +256,16 @@ async fn handle_transition(
                 let new_issue = crate::model::NewIssue::new(
                     None,
                     comment.clone(),
-                    comment,
+                    comment.clone(),
                     target.to_string(),
                     Some(ToOffline::Node),
                 );
-                new_issue.open("ctt", db).await.unwrap();
+                mutation::issue_open(&new_issue, "ctt", db, tx)
+                    .await
+                    .unwrap();
+                let _ = tx
+                    .send(format!("New issue for {}: {}", target, comment))
+                    .await;
                 *new_state
             }
         }
@@ -255,6 +274,9 @@ async fn handle_transition(
             TargetStatus::Offline => TargetStatus::Offline,
             state => {
                 pbs_srv.offline_vnode(target, Some(&comment)).unwrap();
+                let _ = tx
+                    .send(format!("{} found online, offlining: {}", target, comment))
+                    .await;
                 if *state == TargetStatus::Down {
                     TargetStatus::Offline
                 } else {
