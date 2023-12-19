@@ -11,7 +11,6 @@ use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, QuerySele
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
-use pbs::{Attrl, Op};
 use sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::time;
@@ -27,7 +26,7 @@ pub async fn pbs_sync(db: DatabaseConnection) {
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(crate::slack_updater(rx));
         let pbs_srv = pbs::Server::new();
-        let pbs_node_state = get_pbs_nodes(&pbs_srv).await;
+        let pbs_node_state = Cluster::nodes_status(&pbs_srv);
         let mut ctt_node_state = get_ctt_nodes(&db).await;
         // sync ctt and pbs
 
@@ -65,68 +64,6 @@ pub async fn pbs_sync(db: DatabaseConnection) {
         }
         interval.tick().await;
     }
-}
-
-pub async fn get_pbs_nodes(pbs_srv: &pbs::Server) -> HashMap<String, TargetStatus> {
-    //TODO filter stat attribs (just need hostname, jobs, and state)
-    //TODO need to handle err
-    //TODO consider calling pbs_srv.stat_vnode from a spawn_blocking task
-    //TODO add a timeout
-    pbs_srv
-        .stat_vnode(&None, None)
-        .unwrap()
-        .resources
-        .iter()
-        .map(|n| {
-            let name = n.name();
-            let jobs = {
-                if let Some(Attrl::Value(Op::Default(j))) = n.attribs().get("jobs") {
-                    j.is_empty()
-                } else {
-                    false
-                }
-            };
-            let state = match n.attribs().get("state").unwrap() {
-                Attrl::Value(Op::Default(j)) => j,
-                x => {
-                    println!("{:?}", x);
-                    panic!("bad state");
-                }
-            };
-            let state = match state.as_str() {
-                //job-excl or resv-excl
-                x if x.contains("exclusive") => TargetStatus::Online,
-                //order matters, before "down" to capture down,offline nodes
-                x if x.contains("offline") => {
-                    if jobs {
-                        TargetStatus::Draining
-                    } else {
-                        TargetStatus::Offline
-                    }
-                }
-                x if x.contains("down") => {
-                    if jobs {
-                        TargetStatus::Draining
-                    } else {
-                        TargetStatus::Down
-                    }
-                }
-                "job-busy" => TargetStatus::Online,
-                "free" => TargetStatus::Online,
-                x => {
-                    warn!("Unrecognized node state, '{}'", x);
-                    //TODO FIXME handle err
-                    pbs_srv.offline_vnode(&name, None).unwrap();
-                    if jobs {
-                        TargetStatus::Draining
-                    } else {
-                        TargetStatus::Down
-                    }
-                }
-            };
-            (name, state)
-        })
-        .collect()
 }
 
 #[instrument]
@@ -258,7 +195,7 @@ async fn handle_transition(
                     comment.clone(),
                     comment.clone(),
                     target.to_string(),
-                    Some(ToOffline::Node),
+                    None,
                 );
                 mutation::issue_open(&new_issue, "ctt", db, tx)
                     .await
@@ -273,10 +210,9 @@ async fn handle_transition(
             TargetStatus::Draining => TargetStatus::Draining,
             TargetStatus::Offline => TargetStatus::Offline,
             state => {
-                pbs_srv.offline_vnode(target, Some(&comment)).unwrap();
-                let _ = tx
-                    .send(format!("{} found online, offlining: {}", target, comment))
-                    .await;
+                Cluster::offline_node(target, &comment, "ctt", pbs_srv, tx)
+                    .await
+                    .unwrap();
                 if *state == TargetStatus::Down {
                     TargetStatus::Offline
                 } else {

@@ -62,6 +62,7 @@ async fn issue_update(
     ctx: &Context<'_>,
 ) -> Result<issue::Model, String> {
     let db = ctx.data::<DatabaseConnection>().unwrap();
+    let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
     let issue = Issue::find_by_id(i.id).one(db).await.unwrap();
     if issue.is_none() {
         return Err(format!("Issue {} not found", i.id));
@@ -161,17 +162,17 @@ async fn issue_update(
             .unwrap()
             .name,
         db,
+        tx,
     )
     .await;
     Ok(Issue::find_by_id(i.id).one(db).await.unwrap().unwrap())
 }
 
-async fn check_blade(target: &str, db: &DatabaseConnection) {
+async fn check_blade(target: &str, db: &DatabaseConnection, tx: &mpsc::Sender<String>) {
     let srv = Server::new();
     let nodes = Cluster::cousins(target);
     // current status of nodes in blade
-    let current_status: HashMap<String, TargetStatus> = crate::pbs_sync::get_pbs_nodes(&srv)
-        .await
+    let current_status: HashMap<String, TargetStatus> = Cluster::nodes_status(&srv)
         .into_iter()
         .filter(|n| nodes.iter().any(|t| n.0.eq(t)))
         .collect();
@@ -187,9 +188,9 @@ async fn check_blade(target: &str, db: &DatabaseConnection) {
             TargetStatus::Draining => panic!("Expected state is never Draining"),
             TargetStatus::Online => {
                 if new_state != TargetStatus::Online {
-                    if let Err(e) = srv.clear_vnode(&target, None) {
-                        warn!("error clearing vnode: {}", e);
-                    }
+                    Cluster::release_node(&target, "todo", &srv, tx)
+                        .await
+                        .unwrap();
                 }
                 TargetStatus::Online
             }
@@ -197,7 +198,9 @@ async fn check_blade(target: &str, db: &DatabaseConnection) {
                 TargetStatus::Draining => TargetStatus::Draining,
                 TargetStatus::Offline => TargetStatus::Offline,
                 state => {
-                    srv.offline_vnode(&target, Some(&comment)).unwrap();
+                    Cluster::offline_node(&target, &comment, "todo", &srv, tx)
+                        .await
+                        .unwrap();
                     if state == TargetStatus::Down {
                         TargetStatus::Offline
                     } else {
@@ -357,7 +360,7 @@ async fn issue_close(
                 operator, target.name, comment
             ))
             .await;
-        check_blade(&target.name, db).await;
+        check_blade(&target.name, db, tx).await;
     }
     Ok(format!("closed {}", cttissue))
 }
