@@ -2,7 +2,7 @@ use crate::migrator::Migrator;
 use sea_orm::*;
 use sea_orm_migration::{MigratorTrait, SchemaManager};
 
-const DATABASE_URL: &str = "sqlite:///glade/work/shanks/ctt/ctt_server/db.sqlite";
+const DATABASE_URL: &str = "sqlite:///root/shanks/ctt/db.sqlite";
 const DB_NAME: &str = "mydb";
 
 pub async fn setup_and_connect() -> Result<DatabaseConnection, DbErr> {

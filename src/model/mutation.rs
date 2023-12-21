@@ -15,7 +15,7 @@ use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, QueryFilter};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
-use tracing::log::warn;
+use tracing::log::{info, warn};
 
 #[derive(InputObject)]
 pub struct UpdateIssue {
@@ -121,6 +121,7 @@ async fn issue_update(
     if let Some(_) = i.to_offline
         && i.to_offline != issue.to_offline
     {
+        info!("updating to_offline");
         updated_issue.to_offline = ActiveValue::Set(i.to_offline);
         let c = comment::ActiveModel {
             created_by: ActiveValue::Set(operator.to_string()),
@@ -138,7 +139,7 @@ async fn issue_update(
             let status = srv.stat_host(&None, None).unwrap();
             let target = issue.target(ctx).await.unwrap().unwrap();
             for t in to_offline(&target.name, status, i.to_offline).into_iter() {
-                srv.offline_vnode(&t, Some(&format!("{} sibling", &t)))
+                srv.offline_vnode(&t, Some(&format!("{} sibling", &target.name)))
                     .unwrap();
                 let mut sib: target::ActiveModel = Target::from_name(&t, db).await.unwrap().into();
                 sib.status = ActiveValue::Set(TargetStatus::Draining);
@@ -153,6 +154,7 @@ async fn issue_update(
             }
         }
     }
+    info!("Updating issue {}: {:?}", issue.id, updated_issue);
     updated_issue.update(db).await.unwrap();
     check_blade(
         &Target::find_by_id(issue.id)
@@ -172,7 +174,8 @@ async fn check_blade(target: &str, db: &DatabaseConnection, tx: &mpsc::Sender<St
     let srv = Server::new();
     let nodes = Cluster::cousins(target);
     // current status of nodes in blade
-    let current_status: HashMap<String, TargetStatus> = Cluster::nodes_status(&srv)
+    let current_status: HashMap<String, TargetStatus> = Cluster::nodes_status(&srv, tx)
+        .await
         .into_iter()
         .filter(|n| nodes.iter().any(|t| n.0.eq(t)))
         .collect();
@@ -281,6 +284,8 @@ pub async fn issue_open(
         t
     } else {
         warn!("Target not found, creating {}", i.target);
+        //TODO check Target is real
+        //Return Err if not
         Target::create_target(&i.target, TargetStatus::Online, db)
             .await
             .unwrap()
@@ -342,9 +347,9 @@ async fn issue_close(
     let issue = Issue::find_by_id(cttissue).one(db).await.unwrap().unwrap();
     let target = issue.target(ctx).await.unwrap().unwrap();
     if issue.status == IssueStatus::Open {
+        info!("Closing ticket {}: {}", cttissue, comment);
         let mut issue: issue::ActiveModel = issue.into();
         issue.status = ActiveValue::Set(IssueStatus::Closed);
-        issue.reset(issue::Column::Status);
         issue.update(db).await.unwrap();
         let c = comment::ActiveModel {
             created_by: ActiveValue::Set(operator.clone()),

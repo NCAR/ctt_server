@@ -118,16 +118,18 @@ async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (St
 }
 
 #[tokio::main]
+#[instrument]
 async fn main() {
-    let stdout_log = fmt::layer().pretty();
-    tracing_subscriber::registry().with(
+    let stdout_log = fmt::layer().pretty().with_writer(std::io::stderr);
+    let registry = tracing_subscriber::registry().with(
         stdout_log.with_filter(
-            Targets::default()
-                .with_target("ctt_server", Level::TRACE)
+            Targets::new()
                 .with_target("sqlx::query", Level::WARN)
+                .with_target("ctt_server", Level::TRACE)
                 .with_default(Level::INFO),
         ),
     );
+    tracing::subscriber::set_global_default(registry).unwrap();
 
     let db = setup_and_connect().await.unwrap();
 
@@ -138,10 +140,11 @@ async fn main() {
 
     // configure certificate and private key used by https
     let config = RustlsConfig::from_pem_file(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        //PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        PathBuf::from("/root/shanks/ctt/")
             .join("certs")
             .join("cert.pem"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        PathBuf::from("/root/shanks/ctt/")
             .join("certs")
             .join("key.pem"),
     )
@@ -173,7 +176,7 @@ async fn main() {
     //info!("GraphiQL IDE: https://localhost:8000");
 
     // run https server
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
+    let addr = SocketAddr::from(([10, 13, 0, 16], 8000));
     axum_server::bind_rustls(addr, config)
         .handle(handle)
         .serve(app.into_make_service())

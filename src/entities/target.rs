@@ -3,7 +3,7 @@ use async_graphql::*;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, QueryOrder};
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tracing::{info, warn};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, SimpleObject)]
 #[sea_orm(table_name = "target")]
@@ -64,12 +64,23 @@ impl Entity {
         state: TargetStatus,
         db: &DatabaseConnection,
     ) -> Option<Model> {
+        let max = if let Some(t) = Self::find()
+            .order_by_desc(Column::Id)
+            .one(db)
+            .await
+            .unwrap()
+        {
+            t.id
+        } else {
+            0
+        };
         let new_target = ActiveModel {
             name: ActiveValue::Set(name.to_string()),
             status: ActiveValue::Set(state),
-            ..Default::default()
+            id: ActiveValue::Set(max + 1),
         };
-        new_target.insert(db).await.ok()
+        info!("Creating target {:?}", new_target);
+        Some(new_target.insert(db).await.unwrap())
     }
 }
 

@@ -5,18 +5,21 @@ use pbs::{Attrl, Op};
 use std::collections::HashMap;
 use std::str::FromStr;
 use tokio::sync::mpsc;
-use tracing::log::warn;
+use tracing::instrument;
+use tracing::{info, warn};
 pub struct Gust;
 
 impl ClusterTrait for Gust {
     fn siblings(target: &str) -> Vec<String> {
-        if let Some(val) = target.strip_prefix("guc") {
+        //TODO should be "guc" not "gu"
+        if let Some(val) = target.strip_prefix("gu") {
             let num: u32 = FromStr::from_str(val).unwrap();
             //TODO add sanity check, only 18ish nodes in gust
             let blade_start = ((num / 2) * 2) + 1;
             let mut cousins = Vec::with_capacity(2);
             for i in blade_start..blade_start + 2 {
-                cousins.push(format!("guc{:0>4}", i));
+                //TODO should be guc
+                cousins.push(format!("gu{:0>4}", i));
             }
             cousins
         } else if let Some(val) = target.strip_prefix("gug") {
@@ -27,13 +30,15 @@ impl ClusterTrait for Gust {
         }
     }
     fn cousins(target: &str) -> Vec<String> {
-        if let Some(val) = target.strip_prefix("guc") {
+        //TODO should be "guc" not "gu"
+        if let Some(val) = target.strip_prefix("gu") {
             let num: u32 = FromStr::from_str(val).unwrap();
             //TODO add sanity check, only 18ish nodes in gust
             let blade_start = ((num / 4) * 4) + 1;
             let mut cousins = Vec::with_capacity(4);
             for i in blade_start..blade_start + 4 {
-                cousins.push(format!("guc{:0>4}", i));
+                //TODO should be guc
+                cousins.push(format!("gu{:0>4}", i));
             }
             cousins
         } else if let Some(val) = target.strip_prefix("gug") {
@@ -50,84 +55,83 @@ impl ClusterTrait for Gust {
             vec![target.to_string()]
         }
     }
-    fn logical_to_physical(targets: Vec<&str>) -> Vec<String> {
-        todo!()
-    }
-    fn physical_to_logical(targets: Vec<&str>) -> Vec<String> {
-        todo!()
-    }
-    fn all_nodes() -> Vec<String> {
-        todo!()
-    }
     fn real_node(target: &str) -> bool {
         todo!()
     }
-    fn node_status(pbs_srv: &pbs::Server, target: &str) -> TargetStatus {
-        todo!()
-    }
-    fn nodes_status(pbs_srv: &pbs::Server) -> HashMap<String, TargetStatus> {
+
+    #[instrument(skip(pbs_srv))]
+    async fn nodes_status(
+        pbs_srv: &pbs::Server,
+        tx: &mpsc::Sender<String>,
+    ) -> HashMap<String, TargetStatus> {
         //TODO filter stat attribs (just need hostname, jobs, and state)
         //TODO need to handle err
         //TODO consider calling pbs_srv.stat_vnode from a spawn_blocking task
         //TODO add a timeout
-        pbs_srv
-            .stat_vnode(&None, None)
-            .unwrap()
-            .resources
-            .iter()
-            .map(|n| {
-                let name = n.name();
-                let jobs = {
-                    if let Some(Attrl::Value(Op::Default(j))) = n.attribs().get("jobs") {
-                        j.is_empty()
+        let mut resp = HashMap::new();
+        for n in pbs_srv.stat_vnode(&None, None).unwrap().resources.iter() {
+            let name = n.name();
+            let jobs = {
+                if let Some(Attrl::Value(Op::Default(j))) = n.attribs().get("jobs") {
+                    j.is_empty()
+                } else {
+                    false
+                }
+            };
+            let state = match n.attribs().get("state").unwrap() {
+                Attrl::Value(Op::Default(j)) => j,
+                x => {
+                    println!("{:?}", x);
+                    panic!("bad state");
+                }
+            };
+            let state = match state.as_str() {
+                //order matters, before "down" to capture down,offline nodes
+                x if x.contains("offline") => {
+                    if jobs {
+                        TargetStatus::Draining
                     } else {
-                        false
+                        TargetStatus::Offline
                     }
-                };
-                let state = match n.attribs().get("state").unwrap() {
-                    Attrl::Value(Op::Default(j)) => j,
-                    x => {
-                        println!("{:?}", x);
-                        panic!("bad state");
+                }
+                x if x.contains("down") => {
+                    if jobs {
+                        TargetStatus::Draining
+                    } else {
+                        TargetStatus::Down
                     }
-                };
-                let state = match state.as_str() {
-                    //job-excl or resv-excl
-                    x if x.contains("exclusive") => TargetStatus::Online,
-                    //order matters, before "down" to capture down,offline nodes
-                    x if x.contains("offline") => {
-                        if jobs {
-                            TargetStatus::Draining
-                        } else {
-                            TargetStatus::Offline
-                        }
+                }
+                //job-excl or resv-excl
+                x if x.contains("exclusive") => TargetStatus::Online,
+                "job-busy" => TargetStatus::Online,
+                "free" => TargetStatus::Online,
+                x => {
+                    warn!("unrecognized node state, '{}'", x);
+                    //TODO FIXME handle err
+                    //TODO should we really offline nodes randomly while checking node status?
+                    if let Err(e) = pbs_srv.offline_vnode(&name, None) {
+                        warn!("Error offlining node {}: {}", name, e);
                     }
-                    "down" => {
-                        if jobs {
-                            TargetStatus::Draining
-                        } else {
-                            TargetStatus::Down
-                        }
+                    let comment = if let Some(pbs::Attrl::Value(pbs::Op::Default(c))) =
+                        n.attribs().get("comment")
+                    {
+                        c
+                    } else {
+                        ""
+                    };
+                    let _ = tx
+                        .send(format!("ctt offlining: {}, {}", name, comment))
+                        .await;
+                    if jobs {
+                        TargetStatus::Draining
+                    } else {
+                        TargetStatus::Down
                     }
-                    "job-busy" => TargetStatus::Online,
-                    "free" => TargetStatus::Online,
-                    x => {
-                        warn!("Unrecognized node state, '{}'", x);
-                        //TODO FIXME handle err
-                        //TODO should we really offline nodes randomly while checking node status?
-                        if let Err(e) = pbs_srv.offline_vnode(&name, None) {
-                            warn!("Error offlining node {}: {}", name, e);
-                        }
-                        if jobs {
-                            TargetStatus::Draining
-                        } else {
-                            TargetStatus::Down
-                        }
-                    }
-                };
-                (name, state)
-            })
-            .collect()
+                }
+            };
+            resp.insert(name, state);
+        }
+        resp
     }
     async fn release_node(
         target: &str,
@@ -148,12 +152,10 @@ impl ClusterTrait for Gust {
         pbs_srv: &pbs::Server,
         tx: &mpsc::Sender<String>,
     ) -> Result<(), ()> {
+        info!("{} offlining: {}, {}", operator, target, comment);
         pbs_srv.offline_vnode(target, Some(comment)).unwrap();
         let _ = tx
-            .send(format!(
-                "{} {} found online, offlining: {}",
-                operator, target, comment
-            ))
+            .send(format!("{} offlining: {}, {}", operator, target, comment))
             .await;
         Ok(())
     }

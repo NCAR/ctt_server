@@ -14,19 +14,21 @@ use tokio::sync::mpsc;
 use sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::time;
-use tracing::{instrument, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 #[instrument]
 pub async fn pbs_sync(db: DatabaseConnection) {
     //TODO get interval from config file
-    let mut interval = time::interval(Duration::from_secs(60 * 5));
+    let mut interval = time::interval(Duration::from_secs(30));
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
+        interval.tick().await;
+        trace!("performing sync with pbs");
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(crate::slack_updater(rx));
         let pbs_srv = pbs::Server::new();
-        let pbs_node_state = Cluster::nodes_status(&pbs_srv);
+        let pbs_node_state = Cluster::nodes_status(&pbs_srv, &tx).await;
         let mut ctt_node_state = get_ctt_nodes(&db).await;
         // sync ctt and pbs
 
@@ -57,12 +59,8 @@ pub async fn pbs_sync(db: DatabaseConnection) {
                 mutation::issue_open(&new_issue, "ctt", &db, &tx)
                     .await
                     .unwrap();
-                let _ = tx
-                    .send(format!("New issue for {}: Node not found in pbs", target))
-                    .await;
             }
         }
-        interval.tick().await;
     }
 }
 
@@ -93,7 +91,8 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
         } else {
             //TODO check if t is a valid node
             //if not give a warning and return (TargetStatus::Offline, "Invalid node")
-            Target::create_target(target, TargetStatus::Online, db)
+            info!("creating target {}", c);
+            Target::create_target(&c, TargetStatus::Online, db)
                 .await
                 .unwrap()
         };
@@ -197,12 +196,10 @@ async fn handle_transition(
                     target.to_string(),
                     None,
                 );
+                info!("opening issue for {}: {}", target, comment);
                 mutation::issue_open(&new_issue, "ctt", db, tx)
                     .await
                     .unwrap();
-                let _ = tx
-                    .send(format!("New issue for {}: {}", target, comment))
-                    .await;
                 *new_state
             }
         }
@@ -210,6 +207,7 @@ async fn handle_transition(
             TargetStatus::Draining => TargetStatus::Draining,
             TargetStatus::Offline => TargetStatus::Offline,
             state => {
+                info!("{} found in state {:?}, expected offline", target, state);
                 Cluster::offline_node(target, &comment, "ctt", pbs_srv, tx)
                     .await
                     .unwrap();
@@ -226,6 +224,13 @@ async fn handle_transition(
             TargetStatus::Down => TargetStatus::Down,
             TargetStatus::Offline => TargetStatus::Offline,
             TargetStatus::Online => {
+                info!("closing open issues for {}", target);
+                let _ = tx
+                    .send(format!(
+                        "ctt: Closing issues for {}, node found online",
+                        target
+                    ))
+                    .await;
                 close_open_issues(target, db).await;
                 TargetStatus::Online
             }
@@ -233,6 +238,10 @@ async fn handle_transition(
     };
     //dont update state if it hasn't changed
     if *old_state != final_state {
+        debug!(
+            "{}: current: {:?}, expected: {:?}, final: {:?}",
+            target, new_state, expected_state, final_state
+        );
         let node = entities::target::Entity::from_name(target, db)
             .await
             .unwrap();
