@@ -15,9 +15,9 @@ use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, QueryFilter};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
-use tracing::log::{info, warn};
+use tracing::{debug, info, instrument, warn};
 
-#[derive(InputObject)]
+#[derive(InputObject, Debug)]
 pub struct UpdateIssue {
     assigned_to: Option<String>,
     description: Option<String>,
@@ -27,7 +27,7 @@ pub struct UpdateIssue {
     title: Option<String>,
 }
 
-#[derive(InputObject)]
+#[derive(InputObject, Debug)]
 pub struct NewIssue {
     assigned_to: Option<String>,
     description: String,
@@ -37,6 +37,7 @@ pub struct NewIssue {
 }
 
 impl NewIssue {
+    #[instrument]
     pub fn new(
         assigned_to: Option<String>,
         description: String,
@@ -54,8 +55,10 @@ impl NewIssue {
     }
 }
 
+#[derive(Debug)]
 pub struct Mutation;
 
+#[instrument(skip(ctx))]
 async fn issue_update(
     i: UpdateIssue,
     operator: &str,
@@ -170,7 +173,9 @@ async fn issue_update(
     Ok(Issue::find_by_id(i.id).one(db).await.unwrap().unwrap())
 }
 
+#[instrument]
 async fn check_blade(target: &str, db: &DatabaseConnection, tx: &mpsc::Sender<String>) {
+    debug!("Checking blade status for {}", target);
     let srv = Server::new();
     let nodes = Cluster::cousins(target);
     // current status of nodes in blade
@@ -217,11 +222,16 @@ async fn check_blade(target: &str, db: &DatabaseConnection, tx: &mpsc::Sender<St
                 TargetStatus::Down => TargetStatus::Down,
                 TargetStatus::Offline => TargetStatus::Offline,
                 TargetStatus::Online => {
+                    info!("Closing issues for {}", &target);
                     crate::pbs_sync::close_open_issues(&target, db).await;
                     TargetStatus::Online
                 }
             },
         };
+        debug!(
+            "target: {}, current: {:?}, expected: {:?}, final: {:?}",
+            &target, &new_state, &expected_state, &final_state
+        );
         let old_state = crate::pbs_sync::get_ctt_nodes(db).await;
         //dont update state if it hasn't changed
         if *old_state.get(&target).unwrap() != final_state {
@@ -235,6 +245,7 @@ async fn check_blade(target: &str, db: &DatabaseConnection, tx: &mpsc::Sender<St
     }
 }
 
+#[instrument]
 fn node_group(target: &str, group: Option<issue::ToOffline>) -> Vec<String> {
     match group {
         None => vec![],
@@ -246,6 +257,7 @@ fn node_group(target: &str, group: Option<issue::ToOffline>) -> Vec<String> {
     }
 }
 
+#[instrument(skip(status))]
 fn to_offline(target: &str, status: pbs::StatResp, group: Option<issue::ToOffline>) -> Vec<String> {
     let to_offline = node_group(target, group);
     status
@@ -262,6 +274,7 @@ fn to_offline(target: &str, status: pbs::StatResp, group: Option<issue::ToOfflin
         .map(|n| n.name())
         .collect()
 }
+#[instrument]
 pub async fn issue_open(
     i: &NewIssue,
     operator: &str,
@@ -337,6 +350,7 @@ pub async fn issue_open(
     Ok(new_issue)
 }
 
+#[instrument(skip(ctx))]
 async fn issue_close(
     cttissue: i32,
     operator: String,
@@ -347,7 +361,10 @@ async fn issue_close(
     let issue = Issue::find_by_id(cttissue).one(db).await.unwrap().unwrap();
     let target = issue.target(ctx).await.unwrap().unwrap();
     if issue.status == IssueStatus::Open {
-        info!("Closing ticket {}: {}", cttissue, comment);
+        info!(
+            "Closing ticket {} for {}: {}",
+            cttissue, target.name, comment
+        );
         let mut issue: issue::ActiveModel = issue.into();
         issue.status = ActiveValue::Set(IssueStatus::Closed);
         issue.update(db).await.unwrap();
@@ -373,6 +390,7 @@ async fn issue_close(
 #[Object]
 impl Mutation {
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
+    #[instrument(skip(ctx))]
     async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Result<issue::Model, String> {
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = ctx.data_opt::<mpsc::Sender<String>>().unwrap();
@@ -380,6 +398,7 @@ impl Mutation {
         issue_open(&issue, usr, db, tx).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
+    #[instrument(skip(ctx))]
     async fn close<'a>(
         &self,
         ctx: &Context<'a>,
@@ -390,6 +409,7 @@ impl Mutation {
         issue_close(issue, usr, comment, ctx).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
+    #[instrument(skip(ctx))]
     async fn update_issue<'a>(
         &self,
         ctx: &Context<'a>,

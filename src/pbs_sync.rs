@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::time;
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::{debug, info, instrument, warn};
 
 #[instrument]
 pub async fn pbs_sync(db: DatabaseConnection) {
@@ -24,7 +24,7 @@ pub async fn pbs_sync(db: DatabaseConnection) {
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
         interval.tick().await;
-        trace!("performing sync with pbs");
+        info!("performing sync with pbs");
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(crate::slack_updater(rx));
         let pbs_srv = pbs::Server::new();
@@ -61,6 +61,7 @@ pub async fn pbs_sync(db: DatabaseConnection) {
                     .unwrap();
             }
         }
+        debug!("pbs sync complete");
     }
 }
 
@@ -123,6 +124,8 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
     let t = entities::target::Entity::from_name(target, db)
         .await
         .unwrap();
+    //TODO FIXME for some reason this query comes back empty when the one below doesn't even when a
+    //node has toOffline set
     if t.issues()
         .filter(entities::target::Column::Status.eq(IssueStatus::Open))
         .filter(entities::issue::Column::ToOffline.eq(ToOffline::Node))
@@ -170,6 +173,7 @@ pub async fn close_open_issues(target: &str, db: &DatabaseConnection) {
     }
 }
 
+#[instrument(skip(pbs_srv))]
 async fn handle_transition(
     target: &str,
     old_state: &TargetStatus,

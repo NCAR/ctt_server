@@ -139,7 +139,8 @@ impl ClusterTrait for Gust {
         pbs_srv: &pbs::Server,
         tx: &mpsc::Sender<String>,
     ) -> Result<(), ()> {
-        pbs_srv.clear_vnode(target, None).unwrap();
+        info!("{} resuming node {}", operator, target);
+        pbs_srv.clear_vnode(target, Some("")).unwrap();
         let _ = tx
             .send(format!("{} onlining node: {}", operator, target))
             .await;

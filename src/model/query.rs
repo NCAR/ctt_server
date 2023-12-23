@@ -4,18 +4,22 @@ use crate::entities::prelude::*;
 use crate::entities::target;
 use async_graphql::{Context, Object};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
+use tracing::instrument;
 
+#[derive(Debug)]
 pub struct Query;
 
 #[Object]
 impl Query {
     #[graphql(guard = "RoleChecker::new(Role::Admin).or(RoleChecker::new(Role::Guest))")]
+    #[instrument(skip(ctx))]
     async fn issue<'a>(&self, ctx: &Context<'a>, issue: i32) -> Option<issue::Model> {
         let db = ctx.data::<DatabaseConnection>().unwrap();
         Issue::find_by_id(issue).one(db).await.unwrap()
     }
 
     #[graphql(guard = "RoleChecker::new(Role::Admin).or(RoleChecker::new(Role::Guest))")]
+    #[instrument(skip(ctx))]
     async fn issues<'a>(
         &self,
         ctx: &Context<'a>,

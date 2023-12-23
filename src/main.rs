@@ -39,6 +39,7 @@ use tracing_subscriber::{filter::Targets, fmt, Layer};
 mod auth;
 mod model;
 
+#[instrument(skip(schema, req))]
 async fn graphql_handler(
     schema: Extension<model::CttSchema>,
     Extension(role): Extension<auth::RoleGuard>,
@@ -184,6 +185,7 @@ async fn main() {
         .unwrap();
 }
 
+#[instrument]
 async fn graceful_shutdown(handle: Handle) {
     signal::ctrl_c().await.unwrap();
     handle.graceful_shutdown(Some(Duration::from_secs(30)));
