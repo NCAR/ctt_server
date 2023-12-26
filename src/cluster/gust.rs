@@ -15,7 +15,8 @@ impl ClusterTrait for Gust {
         if let Some(val) = target.strip_prefix("gu") {
             let num: u32 = FromStr::from_str(val).unwrap();
             //TODO add sanity check, only 18ish nodes in gust
-            let blade_start = ((num / 2) * 2) + 1;
+            let blade_start = (((num-1) / 2) * 2)+1;
+            //println!("target: {}, blade_start: {}", num, blade_start);
             let mut cousins = Vec::with_capacity(2);
             for i in blade_start..blade_start + 2 {
                 //TODO should be guc
@@ -34,7 +35,7 @@ impl ClusterTrait for Gust {
         if let Some(val) = target.strip_prefix("gu") {
             let num: u32 = FromStr::from_str(val).unwrap();
             //TODO add sanity check, only 18ish nodes in gust
-            let blade_start = ((num / 4) * 4) + 1;
+            let blade_start = (((num-1) / 4) * 4)+1;
             let mut cousins = Vec::with_capacity(4);
             for i in blade_start..blade_start + 4 {
                 //TODO should be guc
@@ -159,5 +160,29 @@ impl ClusterTrait for Gust {
             .send(format!("{} offlining: {}, {}", operator, target, comment))
             .await;
         Ok(())
+    }
+}
+
+#[test]
+fn siblings() {
+    let expected = vec![vec!("gu0001", "gu0002"), vec!("gu0003", "gu0004"), vec!("gu0005", "gu0006") ];
+    for e in &expected {
+        for s in e.iter() {
+        let actual = Gust::siblings(s);
+        println!("expected: {:?} actual: {:?}", &e, &actual);
+        assert!(e.eq(&actual));
+        }
+    }
+}
+
+#[test]
+fn cousins() {
+    let expected = vec![vec!("gu0001", "gu0002", "gu0003", "gu0004"), vec!("gu0005", "gu0006", "gu0007", "gu0008") ];
+    for e in &expected {
+        for s in e.iter() {
+        let actual = Gust::cousins(s);
+        println!("expected: {:?} actual: {:?}", &e, &actual);
+        assert!(e.eq(&actual));
+        }
     }
 }
