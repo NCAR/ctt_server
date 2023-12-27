@@ -14,6 +14,7 @@ use sea_orm::entity::ActiveValue;
 use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, QueryFilter};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, info, instrument, warn};
 
@@ -64,7 +65,7 @@ async fn issue_update(
     operator: &str,
     ctx: &Context<'_>,
 ) -> Result<issue::Model, String> {
-    let db = ctx.data::<DatabaseConnection>().unwrap();
+    let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
     let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
     let issue = Issue::find_by_id(i.id).one(db).await.unwrap();
     if issue.is_none() {
@@ -357,7 +358,7 @@ async fn issue_close(
     comment: String,
     ctx: &Context<'_>,
 ) -> Result<String, String> {
-    let db = ctx.data::<DatabaseConnection>().unwrap();
+    let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
     let issue = Issue::find_by_id(cttissue).one(db).await.unwrap().unwrap();
     let target = issue.target(ctx).await.unwrap().unwrap();
     if issue.status == IssueStatus::Open {
@@ -394,7 +395,7 @@ impl Mutation {
     async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Result<issue::Model, String> {
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = ctx.data_opt::<mpsc::Sender<String>>().unwrap();
-        let db = ctx.data_opt::<DatabaseConnection>().unwrap();
+        let db = ctx.data_opt::<Arc<DatabaseConnection>>().unwrap().as_ref();
         issue_open(&issue, usr, db, tx).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]

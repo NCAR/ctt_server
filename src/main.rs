@@ -26,6 +26,7 @@ use slack_morphism::{
 use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 use tokio::sync::mpsc;
@@ -118,7 +119,7 @@ async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (St
     )
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 #[instrument]
 async fn main() {
     let stdout_log = fmt::layer().pretty().with_writer(std::io::stderr);
@@ -132,8 +133,9 @@ async fn main() {
     );
     tracing::subscriber::set_global_default(registry).unwrap();
 
-    let db = setup_and_connect().await.unwrap();
+    let db = Arc::new(setup_and_connect().await.unwrap());
 
+    tokio::spawn(pbs_sync::pbs_sync(db.clone()));
     let schema = Schema::build(model::Query, model::Mutation, EmptySubscription)
         .extension(Tracing)
         .data(db.clone())
@@ -154,7 +156,6 @@ async fn main() {
 
     let handle = Handle::new();
     tokio::spawn(graceful_shutdown(handle.clone()));
-    tokio::spawn(pbs_sync::pbs_sync(db));
 
     let app = Router::new()
         .route("/", get(graphiql))

@@ -3,11 +3,12 @@ use sea_orm::*;
 use sea_orm_migration::{MigratorTrait, SchemaManager};
 
 const DATABASE_URL: &str = "sqlite:///root/shanks/ctt/db.sqlite";
-const DB_NAME: &str = "mydb";
+//const DB_NAME: &str = "mydb";
 
 pub async fn setup_and_connect() -> Result<DatabaseConnection, DbErr> {
-    let db = Database::connect(DATABASE_URL).await?;
+    let db = Database::connect(DATABASE_URL).await.unwrap();
     let db = match db.get_database_backend() {
+        /*
         DbBackend::MySql => {
             db.execute(Statement::from_string(
                 db.get_database_backend(),
@@ -33,7 +34,9 @@ pub async fn setup_and_connect() -> Result<DatabaseConnection, DbErr> {
             let url = format!("{}/{}", DATABASE_URL, DB_NAME);
             Database::connect(&url).await?
         }
+        */
         DbBackend::Sqlite => db,
+        _ => panic!("only sqlite implemented"),
     };
 
     let schema_manager = SchemaManager::new(&db);

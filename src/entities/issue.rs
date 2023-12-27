@@ -2,6 +2,7 @@ use super::{comment, target};
 use async_graphql::*;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tracing::warn;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, SimpleObject)]
@@ -25,7 +26,7 @@ pub struct Model {
 #[ComplexObject]
 impl Model {
     pub async fn comments(&self, ctx: &Context<'_>) -> Vec<comment::Model> {
-        let db = ctx.data::<DatabaseConnection>().unwrap();
+        let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
         let t = self.find_related(comment::Entity).all(db).await;
         if let Err(e) = t {
             warn!("Error getting target for issue {}: {}", self.id, e);
@@ -35,7 +36,7 @@ impl Model {
         }
     }
     pub async fn target(&self, ctx: &Context<'_>) -> Option<target::Model> {
-        let db = ctx.data::<DatabaseConnection>().unwrap();
+        let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
         let t = self.find_related(target::Entity).one(db).await;
         if let Err(e) = t {
             warn!("Error getting target for issue {}: {}", self.id, e);

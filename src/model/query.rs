@@ -4,6 +4,7 @@ use crate::entities::prelude::*;
 use crate::entities::target;
 use async_graphql::{Context, Object};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
+use std::sync::Arc;
 use tracing::instrument;
 
 #[derive(Debug)]
@@ -14,7 +15,7 @@ impl Query {
     #[graphql(guard = "RoleChecker::new(Role::Admin).or(RoleChecker::new(Role::Guest))")]
     #[instrument(skip(ctx))]
     async fn issue<'a>(&self, ctx: &Context<'a>, issue: i32) -> Option<issue::Model> {
-        let db = ctx.data::<DatabaseConnection>().unwrap();
+        let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
         Issue::find_by_id(issue).one(db).await.unwrap()
     }
 
@@ -26,7 +27,7 @@ impl Query {
         issue_status: Option<issue::IssueStatus>,
         target: Option<String>,
     ) -> Vec<issue::Model> {
-        let db = ctx.data::<DatabaseConnection>().unwrap();
+        let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
         let mut select = target::Entity::find().find_with_related(issue::Entity);
         if let Some(status) = issue_status {
             select =

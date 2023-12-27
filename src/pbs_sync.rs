@@ -7,8 +7,10 @@ use crate::entities::issue::ToOffline;
 use crate::entities::prelude::Target;
 use crate::entities::target::TargetStatus;
 use crate::model::mutation;
+use sea_orm::prelude::Expr;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, QuerySelect};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use sea_orm::DatabaseConnection;
@@ -17,19 +19,20 @@ use tokio::time;
 use tracing::{debug, info, instrument, warn};
 
 #[instrument]
-pub async fn pbs_sync(db: DatabaseConnection) {
+pub async fn pbs_sync(db: Arc<DatabaseConnection>) {
     //TODO get interval from config file
     let mut interval = time::interval(Duration::from_secs(30));
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
         interval.tick().await;
+        let db = db.as_ref();
         info!("performing sync with pbs");
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(crate::slack_updater(rx));
         let pbs_srv = pbs::Server::new();
         let pbs_node_state = Cluster::nodes_status(&pbs_srv, &tx).await;
-        let mut ctt_node_state = get_ctt_nodes(&db).await;
+        let mut ctt_node_state = get_ctt_nodes(db).await;
         // sync ctt and pbs
 
         //handle any pbs nodes not in ctt
@@ -45,7 +48,7 @@ pub async fn pbs_sync(db: DatabaseConnection) {
         for (target, old_state) in &ctt_node_state {
             let pbs_state = pbs_node_state.get(target);
             if let Some(new_state) = pbs_state {
-                handle_transition(target, old_state, new_state, &pbs_srv, &db, &tx).await;
+                handle_transition(target, old_state, new_state, &pbs_srv, db, &tx).await;
             } else {
                 warn!("{} not found in pbs", target);
                 let new_issue = crate::model::NewIssue::new(
@@ -56,7 +59,7 @@ pub async fn pbs_sync(db: DatabaseConnection) {
                     None,
                 );
                 //TODO need to add a way to delete a node from ctt
-                mutation::issue_open(&new_issue, "ctt", &db, &tx)
+                mutation::issue_open(&new_issue, "ctt", db, &tx)
                     .await
                     .unwrap();
             }
@@ -85,6 +88,54 @@ pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetSta
 
 #[instrument]
 pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStatus, String) {
+    let t = entities::target::Entity::from_name(target, db).await;
+    let t = if let Some(tmp) = t {
+        tmp
+    } else {
+        //TODO check if t is a valid node
+        //if not give a warning and return (TargetStatus::Offline, "Invalid node")
+        info!("creating target {}", &target);
+        Target::create_target(target, TargetStatus::Online, db)
+            .await
+            .unwrap()
+    };
+    //TODO FIXME for some reason this query comes back empty when the one below doesn't even when a
+    //node has toOffline set
+    if t.issues()
+        .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+        .filter(Expr::col(entities::issue::Column::ToOffline).is_not_null())
+        .one(db)
+        .await
+        .unwrap()
+        .is_some()
+    {
+        debug!("Offline due to node ticket");
+        return (TargetStatus::Offline, "todo".to_string());
+    }
+    for c in Cluster::siblings(target) {
+        let t = entities::target::Entity::from_name(&c, db).await;
+        let t = if let Some(tmp) = t {
+            tmp
+        } else {
+            //TODO check if t is a valid node
+            //if not give a warning and return (TargetStatus::Offline, "Invalid node")
+            info!("creating target {}", &c);
+            Target::create_target(&c, TargetStatus::Online, db)
+                .await
+                .unwrap()
+        };
+        if t.issues()
+            .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+            .filter(entities::issue::Column::ToOffline.eq(Some(ToOffline::Card)))
+            .one(db)
+            .await
+            .unwrap()
+            .is_some()
+        {
+            debug!("Offline due to card  wide ticket");
+            return (TargetStatus::Offline, "todo".to_string());
+        }
+    }
     for c in Cluster::cousins(target) {
         let t = entities::target::Entity::from_name(&c, db).await;
         let t = if let Some(tmp) = t {
@@ -92,59 +143,35 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
         } else {
             //TODO check if t is a valid node
             //if not give a warning and return (TargetStatus::Offline, "Invalid node")
-            info!("creating target {}", c);
+            info!("creating target {}", &c);
             Target::create_target(&c, TargetStatus::Online, db)
                 .await
                 .unwrap()
         };
         if t.issues()
             .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
-            .filter(entities::issue::Column::ToOffline.eq(ToOffline::Blade))
+            .filter(entities::issue::Column::ToOffline.eq(Some(ToOffline::Blade)))
             .one(db)
             .await
             .unwrap()
             .is_some()
         {
+            debug!("Offline due to blade wide ticket");
             return (TargetStatus::Offline, "todo".to_string());
         }
-    }
-    for c in Cluster::siblings(target) {
-        let t = entities::target::Entity::from_name(&c, db).await.unwrap();
-        if t.issues()
-            .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
-            .filter(entities::issue::Column::ToOffline.eq(ToOffline::Card))
-            .one(db)
-            .await
-            .unwrap()
-            .is_some()
-        {
-            return (TargetStatus::Offline, "todo".to_string());
-        }
-    }
-    let t = entities::target::Entity::from_name(target, db)
-        .await
-        .unwrap();
-    //TODO FIXME for some reason this query comes back empty when the one below doesn't even when a
-    //node has toOffline set
-    if t.issues()
-        .filter(entities::target::Column::Status.eq(IssueStatus::Open))
-        .filter(entities::issue::Column::ToOffline.eq(ToOffline::Node))
-        .one(db)
-        .await
-        .unwrap()
-        .is_some()
-    {
-        return (TargetStatus::Offline, "todo".to_string());
     }
     if t.issues()
         .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+        .filter(Expr::col(entities::issue::Column::ToOffline).is_null())
         .one(db)
         .await
         .unwrap()
         .is_some()
     {
+        debug!("Down due to node ticket");
         return (TargetStatus::Down, "todo".to_string());
     }
+    debug!("Online due to no related tickets");
     (TargetStatus::Online, "todo".to_string())
 }
 
