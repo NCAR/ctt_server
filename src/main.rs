@@ -127,7 +127,7 @@ async fn main() {
         stdout_log.with_filter(
             Targets::new()
                 .with_target("sqlx::query", Level::WARN)
-                .with_target("ctt_server", Level::TRACE)
+                .with_target("ctt_server", Level::DEBUG)
                 .with_default(Level::INFO),
         ),
     );

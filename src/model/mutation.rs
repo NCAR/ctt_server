@@ -143,8 +143,14 @@ async fn issue_update(
             let status = srv.stat_host(&None, None).unwrap();
             let target = issue.target(ctx).await.unwrap().unwrap();
             for t in to_offline(&target.name, status, i.to_offline).into_iter() {
-                srv.offline_vnode(&t, Some(&format!("{} sibling", &target.name)))
-                    .unwrap();
+                srv.offline_vnode(
+                    &t,
+                    Some(&format!(
+                        "{} sibling",
+                        &issue.target(ctx).await.unwrap().unwrap().name
+                    )),
+                )
+                .unwrap();
                 let mut sib: target::ActiveModel = Target::from_name(&t, db).await.unwrap().into();
                 sib.status = ActiveValue::Set(TargetStatus::Draining);
                 sib.update(db).await.unwrap();
@@ -197,7 +203,7 @@ async fn check_blade(target: &str, db: &DatabaseConnection, tx: &mpsc::Sender<St
             TargetStatus::Draining => panic!("Expected state is never Draining"),
             TargetStatus::Online => {
                 if new_state != TargetStatus::Online {
-                    Cluster::release_node(&target, "todo", &srv, tx)
+                    Cluster::release_node(&target, "ctt", &srv, tx)
                         .await
                         .unwrap();
                 }
@@ -207,7 +213,7 @@ async fn check_blade(target: &str, db: &DatabaseConnection, tx: &mpsc::Sender<St
                 TargetStatus::Draining => TargetStatus::Draining,
                 TargetStatus::Offline => TargetStatus::Offline,
                 state => {
-                    Cluster::offline_node(&target, &comment, "todo", &srv, tx)
+                    Cluster::offline_node(&target, &comment, "ctt", &srv, tx)
                         .await
                         .unwrap();
                     if state == TargetStatus::Down {
@@ -310,7 +316,7 @@ pub async fn issue_open(
         let srv = Server::new();
         let status = srv.stat_host(&None, None).unwrap();
         for t in to_offline(&i.target, status, i.to_offline).into_iter() {
-            srv.offline_vnode(&t, Some(&format!("{} sibling", &t)))
+            srv.offline_vnode(&t, Some(&format!("{} sibling", &i.target)))
                 .unwrap();
             let mut sib: target::ActiveModel = Target::from_name(&t, db).await.unwrap().into();
             sib.status = ActiveValue::Set(TargetStatus::Draining);

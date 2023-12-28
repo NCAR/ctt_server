@@ -16,9 +16,9 @@ use tokio::sync::mpsc;
 use sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio::time;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
-#[instrument]
+#[instrument(skip(db))]
 pub async fn pbs_sync(db: Arc<DatabaseConnection>) {
     //TODO get interval from config file
     let mut interval = time::interval(Duration::from_secs(30));
@@ -68,7 +68,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>) {
     }
 }
 
-#[instrument]
+#[instrument(skip(db))]
 pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetStatus> {
     let ctt_node_state = entities::target::Entity::all()
         .select_only()
@@ -86,7 +86,7 @@ pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetSta
         .collect()
 }
 
-#[instrument]
+#[instrument(skip(db))]
 pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStatus, String) {
     let t = entities::target::Entity::from_name(target, db).await;
     let t = if let Some(tmp) = t {
@@ -101,16 +101,16 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
     };
     //TODO FIXME for some reason this query comes back empty when the one below doesn't even when a
     //node has toOffline set
-    if t.issues()
+    if let Some(iss) = t
+        .issues()
         .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
         .filter(Expr::col(entities::issue::Column::ToOffline).is_not_null())
         .one(db)
         .await
         .unwrap()
-        .is_some()
     {
         debug!("Offline due to node ticket");
-        return (TargetStatus::Offline, "todo".to_string());
+        return (TargetStatus::Offline, iss.title);
     }
     for c in Cluster::siblings(target) {
         let t = entities::target::Entity::from_name(&c, db).await;
@@ -133,7 +133,7 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
             .is_some()
         {
             debug!("Offline due to card  wide ticket");
-            return (TargetStatus::Offline, "todo".to_string());
+            return (TargetStatus::Offline, format!("{} sibling", &target));
         }
     }
     for c in Cluster::cousins(target) {
@@ -157,25 +157,25 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
             .is_some()
         {
             debug!("Offline due to blade wide ticket");
-            return (TargetStatus::Offline, "todo".to_string());
+            return (TargetStatus::Offline, format!("{} sibling", &target));
         }
     }
-    if t.issues()
+    if let Some(iss) = t
+        .issues()
         .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
         .filter(Expr::col(entities::issue::Column::ToOffline).is_null())
         .one(db)
         .await
         .unwrap()
-        .is_some()
     {
         debug!("Down due to node ticket");
-        return (TargetStatus::Down, "todo".to_string());
+        return (TargetStatus::Down, iss.title);
     }
-    debug!("Online due to no related tickets");
-    (TargetStatus::Online, "todo".to_string())
+    trace!("Online due to no related tickets");
+    (TargetStatus::Online, "".to_string())
 }
 
-#[instrument]
+#[instrument(skip(db))]
 pub async fn close_open_issues(target: &str, db: &DatabaseConnection) {
     for issue in entities::target::Entity::from_name(target, db)
         .await
@@ -200,7 +200,7 @@ pub async fn close_open_issues(target: &str, db: &DatabaseConnection) {
     }
 }
 
-#[instrument(skip(pbs_srv))]
+#[instrument(skip(pbs_srv, db, tx))]
 async fn handle_transition(
     target: &str,
     old_state: &TargetStatus,
