@@ -74,7 +74,7 @@ impl ClusterTrait for Gust {
             let name = n.name();
             let jobs = {
                 if let Some(Attrl::Value(Op::Default(j))) = n.attribs().get("jobs") {
-                    j.is_empty()
+                    !j.is_empty()
                 } else {
                     false
                 }

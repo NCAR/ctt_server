@@ -1,4 +1,7 @@
 use super::{comment, target};
+use crate::cluster::ClusterTrait;
+#[cfg(feature = "gust")]
+use crate::cluster::Gust as Cluster;
 use async_graphql::*;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -44,6 +47,37 @@ impl Model {
         } else {
             t.unwrap()
         }
+    }
+    pub async fn related(&self, ctx: &Context<'_>) -> Vec<target::Model> {
+        let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
+        let mut related: Vec<target::Model> = vec![];
+        let tar = self.target(ctx).await;
+        if let Err(e) = tar {
+            warn!("Error getting target for issue {}: {:?}", self.id, e);
+            return related;
+        };
+        let tar = tar.unwrap().unwrap();
+        match self.to_offline {
+            Some(ToOffline::Card) => {
+                for t in Cluster::siblings(&tar.name) {
+                    if let Some(tmp) = target::Entity::from_name(&t, db).await {
+                        related.push(tmp);
+                    }
+                }
+            }
+            Some(ToOffline::Blade) => {
+                for t in Cluster::cousins(&tar.name) {
+                    if let Some(tmp) = target::Entity::from_name(&t, db).await {
+                        related.push(tmp);
+                    }
+                }
+            }
+            _ => {
+                //target is related if ToOffline is Node or None
+                related.push(tar)
+            }
+        }
+        related
     }
 }
 

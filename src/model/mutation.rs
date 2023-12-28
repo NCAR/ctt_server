@@ -166,17 +166,7 @@ async fn issue_update(
     }
     info!("Updating issue {}: {:?}", issue.id, updated_issue);
     updated_issue.update(db).await.unwrap();
-    check_blade(
-        &Target::find_by_id(issue.id)
-            .one(db)
-            .await
-            .unwrap()
-            .unwrap()
-            .name,
-        db,
-        tx,
-    )
-    .await;
+    check_blade(&issue.target(ctx).await.unwrap().unwrap().name, db, tx).await;
     Ok(Issue::find_by_id(i.id).one(db).await.unwrap().unwrap())
 }
 
