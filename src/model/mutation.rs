@@ -45,13 +45,17 @@ impl NewIssue {
         title: String,
         target: String,
         to_offline: Option<issue::ToOffline>,
-    ) -> Self {
-        Self {
-            assigned_to,
-            description,
-            to_offline,
-            target,
-            title,
+    ) -> Option<Self> {
+        if Cluster::real_node(&target) {
+            Some(Self {
+                assigned_to,
+                description,
+                to_offline,
+                target,
+                title,
+            })
+        } else {
+            None
         }
     }
 }
@@ -278,9 +282,13 @@ pub async fn issue_open(
     db: &DatabaseConnection,
     tx: &mpsc::Sender<String>,
 ) -> Result<issue::Model, String> {
-    if let Some(i) = Target::from_name(&i.target, db)
-        .await
-        .unwrap()
+    let target = if let Some(t) = Target::from_name(&i.target, db).await {
+        t
+    } else {
+        warn!("Target {} not found", i.target);
+        return Err(format!("Node {} does not exist", i.target));
+    };
+    if let Some(i) = target
         .issues()
         .filter(issue::Column::Status.eq(IssueStatus::Open))
         .filter(issue::Column::Title.eq(&i.title))
@@ -290,16 +298,6 @@ pub async fn issue_open(
     {
         return Ok(i);
     }
-    let target = if let Some(t) = Target::from_name(&i.target, db).await {
-        t
-    } else {
-        warn!("Target not found, creating {}", i.target);
-        //TODO check Target is real
-        //Return Err if not
-        Target::create_target(&i.target, TargetStatus::Online, db)
-            .await
-            .unwrap()
-    };
     let target_id = target.id;
     #[cfg(feature = "pbs")]
     {

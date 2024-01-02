@@ -56,8 +56,16 @@ impl ClusterTrait for Gust {
             vec![target.to_string()]
         }
     }
+    #[instrument]
     fn real_node(target: &str) -> bool {
-        todo!()
+        if let Some(val) = target.strip_prefix("gu") {
+            if val.len() == 4 {
+                if let Ok(num) = val.parse::<u32>() {
+                    return num <= 18 && num > 0;
+                }
+            }
+        }
+        false
     }
 
     #[instrument(skip(pbs_srv))]
@@ -190,5 +198,21 @@ fn cousins() {
             println!("expected: {:?} actual: {:?}", &e, &actual);
             assert!(e.eq(&actual));
         }
+    }
+}
+
+#[test]
+fn real_node() {
+    let expected_true = vec!["gu0001", "gu0002", "gu0015", "gu0016", "gu0017", "gu0018"];
+    let expected_false = vec!["gu1", "gu0000", "NotANode", "gu-001", "gu0019"];
+    for n in &expected_true {
+        let actual = Gust::real_node(n);
+        println!("for {} expected: true, actual: {}", n, actual);
+        assert!(actual);
+    }
+    for n in &expected_false {
+        let actual = Gust::real_node(n);
+        println!("for {} expected: false, actual: {}", n, actual);
+        assert!(!actual);
     }
 }

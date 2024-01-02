@@ -1,9 +1,12 @@
 use super::issue;
+use crate::cluster::ClusterTrait;
+#[cfg(feature = "gust")]
+use crate::cluster::Gust as Cluster;
 use async_graphql::*;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, QueryOrder};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{debug, info, instrument, warn};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, SimpleObject)]
 #[sea_orm(table_name = "target")]
@@ -29,6 +32,7 @@ impl Related<super::issue::Entity> for Entity {
 }
 
 impl Model {
+    #[instrument]
     pub fn issues(&self) -> Select<issue::Entity> {
         self.find_related(issue::Entity)
     }
@@ -37,18 +41,29 @@ impl Model {
 impl ActiveModelBehavior for ActiveModel {}
 
 impl Entity {
+    #[instrument]
     pub fn all() -> Select<Entity> {
         Self::find().order_by_asc(Column::Name)
     }
+    #[instrument]
     pub async fn from_name(name: &str, db: &DatabaseConnection) -> Option<Model> {
+        if !Cluster::real_node(name) {
+            debug!("request node {} is not real", name);
+            return None;
+        }
         let target = Self::find().filter(Column::Name.eq(name)).one(db).await;
         if let Err(e) = target {
             warn!("Error getting target {} by name: {}", name, e);
-            None
+            return None;
+        }
+        let target = target.unwrap();
+        if target.is_none() {
+            Self::create_target(name, TargetStatus::Online, db).await
         } else {
-            target.unwrap()
+            target
         }
     }
+    #[instrument]
     pub async fn from_id(id: i32, db: &DatabaseConnection) -> Option<Model> {
         let target = Self::find_by_id(id).one(db).await;
         if let Err(e) = target {
@@ -59,11 +74,16 @@ impl Entity {
         }
     }
 
-    pub async fn create_target(
+    #[instrument]
+    async fn create_target(
         name: &str,
         state: TargetStatus,
         db: &DatabaseConnection,
     ) -> Option<Model> {
+        if !Cluster::real_node(name) {
+            warn!("Tried making target for fake node {}", name);
+            return None;
+        }
         let max = if let Some(t) = Self::find()
             .order_by_desc(Column::Id)
             .one(db)

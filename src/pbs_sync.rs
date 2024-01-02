@@ -5,7 +5,6 @@ use crate::conf::Conf;
 use crate::entities;
 use crate::entities::issue::IssueStatus;
 use crate::entities::issue::ToOffline;
-use crate::entities::prelude::Target;
 use crate::entities::target::TargetStatus;
 use crate::model::mutation;
 use sea_orm::prelude::Expr;
@@ -51,17 +50,17 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
                     .await;
             } else {
                 warn!("{} not found in pbs", target);
-                let new_issue = crate::model::NewIssue::new(
+                if let Some(new_issue) = crate::model::NewIssue::new(
                     None,
                     "Node not found in pbs".to_string(),
                     "Node not found in pbs".to_string(),
                     target.to_string(),
                     None,
-                );
-                //TODO need to add a way to delete a node from ctt
-                mutation::issue_open(&new_issue, "ctt", db, &tx)
-                    .await
-                    .unwrap();
+                ) {
+                    mutation::issue_open(&new_issue, "ctt", db, &tx)
+                        .await
+                        .unwrap();
+                }
             }
         }
         debug!("pbs sync complete");
@@ -89,74 +88,58 @@ pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetSta
 #[instrument(skip(db))]
 pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStatus, String) {
     let t = entities::target::Entity::from_name(target, db).await;
-    let t = if let Some(tmp) = t {
-        tmp
-    } else {
-        //TODO check if t is a valid node
-        //if not give a warning and return (TargetStatus::Offline, "Invalid node")
-        info!("creating target {}", &target);
-        Target::create_target(target, TargetStatus::Online, db)
-            .await
-            .unwrap()
-    };
-    if let Some(iss) = t
-        .issues()
-        .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
-        .filter(Expr::col(entities::issue::Column::ToOffline).is_not_null())
-        .one(db)
-        .await
-        .unwrap()
-    {
-        debug!("Offline due to node ticket");
-        return (TargetStatus::Offline, iss.title);
-    }
-    for c in Cluster::siblings(target) {
-        let t = entities::target::Entity::from_name(&c, db).await;
-        let t = if let Some(tmp) = t {
-            tmp
-        } else {
-            //TODO check if t is a valid node
-            //if not give a warning and return (TargetStatus::Offline, "Invalid node")
-            info!("creating target {}", &c);
-            Target::create_target(&c, TargetStatus::Online, db)
+    let t = match t {
+        None => return (TargetStatus::Offline, "Not a real node".to_string()),
+        Some(t) => {
+            if let Some(iss) = t
+                .issues()
+                .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+                .filter(Expr::col(entities::issue::Column::ToOffline).is_not_null())
+                .one(db)
                 .await
                 .unwrap()
-        };
-        if t.issues()
-            .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
-            .filter(entities::issue::Column::ToOffline.eq(Some(ToOffline::Card)))
-            .one(db)
-            .await
-            .unwrap()
-            .is_some()
-        {
-            debug!("Offline due to card  wide ticket");
-            return (TargetStatus::Offline, format!("{} sibling", &target));
+            {
+                debug!("Offline due to node ticket");
+                return (TargetStatus::Offline, iss.title);
+            }
+            t
         }
+    };
+    for c in Cluster::siblings(target) {
+        match entities::target::Entity::from_name(&c, db).await {
+            None => warn!("expected sibling {} doesn't exist", c),
+            Some(t) => {
+                if t.issues()
+                    .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+                    .filter(entities::issue::Column::ToOffline.eq(Some(ToOffline::Card)))
+                    .one(db)
+                    .await
+                    .unwrap()
+                    .is_some()
+                {
+                    debug!("Offline due to card  wide ticket");
+                    return (TargetStatus::Offline, format!("{} sibling", &target));
+                }
+            }
+        };
     }
     for c in Cluster::cousins(target) {
-        let t = entities::target::Entity::from_name(&c, db).await;
-        let t = if let Some(tmp) = t {
-            tmp
-        } else {
-            //TODO check if t is a valid node
-            //if not give a warning and return (TargetStatus::Offline, "Invalid node")
-            info!("creating target {}", &c);
-            Target::create_target(&c, TargetStatus::Online, db)
-                .await
-                .unwrap()
+        match entities::target::Entity::from_name(&c, db).await {
+            None => warn!("expected sibling {} doesn't exist", c),
+            Some(t) => {
+                if t.issues()
+                    .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+                    .filter(entities::issue::Column::ToOffline.eq(Some(ToOffline::Blade)))
+                    .one(db)
+                    .await
+                    .unwrap()
+                    .is_some()
+                {
+                    debug!("Offline due to blade wide ticket");
+                    return (TargetStatus::Offline, format!("{} sibling", &target));
+                }
+            }
         };
-        if t.issues()
-            .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
-            .filter(entities::issue::Column::ToOffline.eq(Some(ToOffline::Blade)))
-            .one(db)
-            .await
-            .unwrap()
-            .is_some()
-        {
-            debug!("Offline due to blade wide ticket");
-            return (TargetStatus::Offline, format!("{} sibling", &target));
-        }
     }
     if let Some(iss) = t
         .issues()
@@ -219,17 +202,18 @@ async fn handle_transition(
             if *new_state == TargetStatus::Online {
                 TargetStatus::Online
             } else {
-                let new_issue = crate::model::NewIssue::new(
+                if let Some(new_issue) = crate::model::NewIssue::new(
                     None,
                     new_comment.to_string(),
                     new_comment.to_string(),
                     target.to_string(),
                     None,
-                );
-                info!("opening issue for {}: {}", target, new_comment);
-                mutation::issue_open(&new_issue, "ctt", db, tx)
-                    .await
-                    .unwrap();
+                ) {
+                    info!("opening issue for {}: {}", target, new_comment);
+                    mutation::issue_open(&new_issue, "ctt", db, tx)
+                        .await
+                        .unwrap();
+                }
                 *new_state
             }
         }
@@ -272,9 +256,13 @@ async fn handle_transition(
             "{}: current: {:?}, expected: {:?}, final: {:?}",
             target, new_state, expected_state, final_state
         );
-        let node = entities::target::Entity::from_name(target, db)
-            .await
-            .unwrap();
+        let node = if let Some(tmp) = entities::target::Entity::from_name(target, db).await {
+            tmp
+        } else {
+            warn!("trying to update state for fake node {}", target);
+            return;
+        };
+
         let mut updated_target: entities::target::ActiveModel = node.into();
         updated_target.status = ActiveValue::Set(final_state);
         updated_target.update(db).await.unwrap();
