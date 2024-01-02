@@ -1,9 +1,11 @@
 #![feature(let_chains)]
 mod cluster;
+mod conf;
 mod entities;
 mod migrator;
 mod pbs_sync;
 mod setup;
+use crate::conf::Conf;
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
 use axum::{
@@ -39,6 +41,9 @@ use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::{filter::Targets, fmt, Layer};
 mod auth;
 mod model;
+use std::sync::OnceLock;
+
+static CONFIG: OnceLock<Conf> = OnceLock::new();
 
 #[instrument(skip(schema, req))]
 async fn graphql_handler(
@@ -47,7 +52,7 @@ async fn graphql_handler(
     req: GraphQLRequest,
 ) -> GraphQLResponse {
     let (tx, rx) = mpsc::channel(5);
-    tokio::spawn(slack_updater(rx));
+    tokio::spawn(slack_updater(rx, CONFIG.get().unwrap().clone()));
     let mut req = req.into_inner();
     req = req.data(role);
     req = req.data(tx);
@@ -58,7 +63,7 @@ async fn graphql_handler(
 
 #[cfg(not(feature = "slack"))]
 #[instrument]
-async fn slack_updater(mut rx: mpsc::Receiver<String>) {
+async fn slack_updater(mut rx: mpsc::Receiver<String>, _conf: Conf) {
     let mut updates = vec![];
     while let Some(u) = rx.recv().await {
         updates.push(u);
@@ -71,13 +76,21 @@ async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     }
 }
 
+//TODO use enum for slack mpsc
+#[allow(dead_code)]
+enum CttEvent {
+    OpenTicket(String),
+    CloseTicket(String),
+    OnlineNode(String),
+    OfflineNode(String),
+}
+
 #[cfg(feature = "slack")]
-#[instrument]
-async fn slack_updater(mut rx: mpsc::Receiver<String>) {
+#[instrument(skip(conf))]
+async fn slack_updater(mut rx: mpsc::Receiver<String>, conf: Conf) {
     let connector = SlackClientHyperConnector::new();
     let client = SlackClient::new(connector);
-    let token_value: SlackApiTokenValue =
-        env::var("SLACK_TOKEN").expect("Missing SLACK_TOKEN").into();
+    let token_value: SlackApiTokenValue = conf.slack.token.into();
     let token: SlackApiToken = SlackApiToken::new(token_value);
     let mut updates = vec![];
     while let Some(u) = rx.recv().await {
@@ -89,9 +102,8 @@ async fn slack_updater(mut rx: mpsc::Receiver<String>) {
     let session = client.open_session(&token);
 
     // Send a simple text message
-    // TODO get channel name from config file
     let post_chat_req = SlackApiChatPostMessageRequest::new(
-        "#shanks-test".into(),
+        format!("#{}", conf.slack.channel).into(),
         SlackMessageContent::new().with_text(format!("{:?}", updates)),
     );
 
@@ -122,6 +134,10 @@ async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (St
 #[tokio::main(flavor = "current_thread")]
 #[instrument]
 async fn main() {
+    //TODO get this as a cli arg{
+    let conf_file = env::args().nth(1);
+    let conf = conf::get_config(conf_file).unwrap();
+    CONFIG.set(conf.clone()).unwrap();
     let stdout_log = fmt::layer().pretty().with_writer(std::io::stderr);
     let registry = tracing_subscriber::registry().with(
         stdout_log.with_filter(
@@ -135,7 +151,6 @@ async fn main() {
 
     let db = Arc::new(setup_and_connect().await.unwrap());
 
-    tokio::spawn(pbs_sync::pbs_sync(db.clone()));
     let schema = Schema::build(model::Query, model::Mutation, EmptySubscription)
         .extension(Tracing)
         .data(db.clone())
@@ -156,6 +171,7 @@ async fn main() {
 
     let handle = Handle::new();
     tokio::spawn(graceful_shutdown(handle.clone()));
+    tokio::spawn(pbs_sync::pbs_sync(db.clone(), conf.clone()));
 
     let app = Router::new()
         .route("/", get(graphiql))

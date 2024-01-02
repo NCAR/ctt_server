@@ -1,6 +1,7 @@
 use crate::cluster::ClusterTrait;
 #[cfg(feature = "gust")]
 use crate::cluster::Gust as Cluster;
+use crate::conf::Conf;
 use crate::entities;
 use crate::entities::issue::IssueStatus;
 use crate::entities::issue::ToOffline;
@@ -18,10 +19,9 @@ use std::time::Duration;
 use tokio::time;
 use tracing::{debug, info, instrument, trace, warn};
 
-#[instrument(skip(db))]
-pub async fn pbs_sync(db: Arc<DatabaseConnection>) {
-    //TODO get interval from config file
-    let mut interval = time::interval(Duration::from_secs(30));
+#[instrument(skip(db, conf))]
+pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
+    let mut interval = time::interval(Duration::from_secs(conf.poll_interval));
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
@@ -29,11 +29,10 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>) {
         let db = db.as_ref();
         info!("performing sync with pbs");
         let (tx, rx) = mpsc::channel(5);
-        tokio::spawn(crate::slack_updater(rx));
+        tokio::spawn(crate::slack_updater(rx, conf.clone()));
         let pbs_srv = pbs::Server::new();
         let pbs_node_state = Cluster::nodes_status(&pbs_srv, &tx).await;
         let mut ctt_node_state = get_ctt_nodes(db).await;
-        // sync ctt and pbs
 
         //handle any pbs nodes not in ctt
         pbs_node_state
@@ -45,6 +44,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>) {
                 ctt_node_state.insert(t.to_string(), TargetStatus::Online);
             });
 
+        // sync ctt and pbs
         for (target, old_state) in &ctt_node_state {
             let pbs_state = pbs_node_state.get(target);
             if let Some(new_state) = pbs_state {
@@ -99,8 +99,6 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
             .await
             .unwrap()
     };
-    //TODO FIXME for some reason this query comes back empty when the one below doesn't even when a
-    //node has toOffline set
     if let Some(iss) = t
         .issues()
         .filter(entities::issue::Column::Status.eq(IssueStatus::Open))

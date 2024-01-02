@@ -3,3 +3,4 @@
 /certs
 env.sh
 db.sqlite
+conf.yml

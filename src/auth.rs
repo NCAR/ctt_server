@@ -112,8 +112,8 @@ async fn check_role(usr: &str, uid: u32) -> Option<Role> {
         .map(|g| g.name().to_os_string().into_string())
         .filter_map(|x| x.ok())
         .collect();
-    let admin = vec!["shanks", "hsg", "ssg", "root"];
-    let guest = vec!["ncar"];
+    let admin = vec!["hsg", "ssg"];
+    let guest = vec!["ncar", "root"];
     for g in admin {
         if groups.contains(g) {
             info!("admin!");
