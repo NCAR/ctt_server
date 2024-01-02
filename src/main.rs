@@ -134,7 +134,11 @@ async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (St
 #[tokio::main(flavor = "current_thread")]
 #[instrument]
 async fn main() {
-    //TODO get this as a cli arg{
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default_panic(info);
+        std::process::exit(1);
+    }));
     let conf_file = env::args().nth(1);
     let conf = conf::get_config(conf_file).unwrap();
     CONFIG.set(conf.clone()).unwrap();
