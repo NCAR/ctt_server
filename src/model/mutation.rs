@@ -176,13 +176,13 @@ async fn check_blade(target: &str, db: &DatabaseConnection, tx: &mpsc::Sender<St
     let srv = Server::new();
     let nodes = Cluster::cousins(target);
     // current status of nodes in blade
-    let current_status: HashMap<String, TargetStatus> = Cluster::nodes_status(&srv, tx)
+    let current_status: HashMap<String, (TargetStatus, String)> = Cluster::nodes_status(&srv, tx)
         .await
         .into_iter()
         .filter(|n| nodes.iter().any(|t| n.0.eq(t)))
         .collect();
 
-    for (target, new_state) in current_status {
+    for (target, (new_state, _new_comment)) in current_status {
         let (expected_state, comment) = crate::pbs_sync::desired_state(&target, db).await;
         //almost the same as crate::pbs_sync::handle_transition, but different logic
         //e.g. release a node if expected online but found offline

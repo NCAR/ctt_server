@@ -64,7 +64,7 @@ impl ClusterTrait for Gust {
     async fn nodes_status(
         pbs_srv: &pbs::Server,
         tx: &mpsc::Sender<String>,
-    ) -> HashMap<String, TargetStatus> {
+    ) -> HashMap<String, (TargetStatus, String)> {
         //TODO filter stat attribs (just need hostname, jobs, and state)
         //TODO need to handle err
         //TODO consider calling pbs_srv.stat_vnode from a spawn_blocking task
@@ -79,6 +79,12 @@ impl ClusterTrait for Gust {
                     false
                 }
             };
+            let comment =
+                if let Some(pbs::Attrl::Value(pbs::Op::Default(c))) = n.attribs().get("comment") {
+                    c
+                } else {
+                    ""
+                };
             let state = match n.attribs().get("state").unwrap() {
                 Attrl::Value(Op::Default(j)) => j,
                 x => {
@@ -113,13 +119,6 @@ impl ClusterTrait for Gust {
                     if let Err(e) = pbs_srv.offline_vnode(&name, None) {
                         warn!("Error offlining node {}: {}", name, e);
                     }
-                    let comment = if let Some(pbs::Attrl::Value(pbs::Op::Default(c))) =
-                        n.attribs().get("comment")
-                    {
-                        c
-                    } else {
-                        ""
-                    };
                     let _ = tx
                         .send(format!("ctt offlining: {}, {}", name, comment))
                         .await;
@@ -130,7 +129,7 @@ impl ClusterTrait for Gust {
                     }
                 }
             };
-            resp.insert(name, state);
+            resp.insert(name, (state, comment.to_string()));
         }
         resp
     }

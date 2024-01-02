@@ -9,7 +9,7 @@ pub trait ClusterTrait {
     async fn nodes_status(
         pbs_srv: &pbs::Server,
         tx: &mpsc::Sender<String>,
-    ) -> HashMap<String, TargetStatus>;
+    ) -> HashMap<String, (TargetStatus, String)>;
     async fn release_node(
         target: &str,
         operator: &str,

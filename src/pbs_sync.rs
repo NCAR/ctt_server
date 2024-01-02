@@ -46,9 +46,9 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
 
         // sync ctt and pbs
         for (target, old_state) in &ctt_node_state {
-            let pbs_state = pbs_node_state.get(target);
-            if let Some(new_state) = pbs_state {
-                handle_transition(target, old_state, new_state, &pbs_srv, db, &tx).await;
+            if let Some((new_state, pbs_comment)) = pbs_node_state.get(target) {
+                handle_transition(target, pbs_comment, old_state, new_state, &pbs_srv, db, &tx)
+                    .await;
             } else {
                 warn!("{} not found in pbs", target);
                 let new_issue = crate::model::NewIssue::new(
@@ -201,6 +201,7 @@ pub async fn close_open_issues(target: &str, db: &DatabaseConnection) {
 #[instrument(skip(pbs_srv, db, tx))]
 async fn handle_transition(
     target: &str,
+    new_comment: &str,
     old_state: &TargetStatus,
     new_state: &TargetStatus,
     pbs_srv: &pbs::Server,
@@ -220,12 +221,12 @@ async fn handle_transition(
             } else {
                 let new_issue = crate::model::NewIssue::new(
                     None,
-                    comment.clone(),
-                    comment.clone(),
+                    new_comment.to_string(),
+                    new_comment.to_string(),
                     target.to_string(),
                     None,
                 );
-                info!("opening issue for {}: {}", target, comment);
+                info!("opening issue for {}: {}", target, new_comment);
                 mutation::issue_open(&new_issue, "ctt", db, tx)
                     .await
                     .unwrap();
