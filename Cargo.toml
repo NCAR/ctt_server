@@ -7,10 +7,8 @@ description = "Graphql api for CTT"
 repository = "https://github.com/Will-Shanks/ctt_server"
 
 [dependencies]
-# TODO don't get from git after updates to axum 0.7
-# https://github.com/async-graphql/async-graphql/pull/1431
-async-graphql = { git = "https://github.com/davidpdrsn/async-graphql.git", rev = "62f1a65", features = ["tracing", "chrono"] }
-async-graphql-axum = { git = "https://github.com/davidpdrsn/async-graphql.git", rev = "62f1a65"}
+async-graphql = { version = "7", features = ["tracing", "chrono"] }
+async-graphql-axum =  "7"
 async-trait = "0.1"
 axum = "0.7"
 axum-server = { version = "0.6", features = ["tls-rustls"] }
