@@ -30,7 +30,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::signal;
+use tokio::select;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tower::ServiceBuilder;
@@ -208,7 +209,13 @@ async fn main() {
 
 #[instrument]
 async fn graceful_shutdown(handle: Handle) {
-    signal::ctrl_c().await.unwrap();
+    let mut sigterm = signal(SignalKind::terminate()).unwrap();
+    let mut sigint = signal(SignalKind::interrupt()).unwrap();
+    select! {
+        _ = sigint.recv() => (),
+        _ = sigterm.recv() => (),
+    };
+    println!("Shutting down");
     handle.graceful_shutdown(Some(Duration::from_secs(30)));
     loop {
         sleep(Duration::from_secs(1)).await;
