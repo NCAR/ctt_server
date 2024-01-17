@@ -1,0 +1,18 @@
+[Unit]
+Description=CTT server service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+Restart=on-failure
+TimeoutStopSec=70
+ExecStart=/opt/ncar/bin/ctt_server
+KillSignal=SIGTERM
+User=ctt
+
+
+[Install]
+WantedBy=default.target
+
+

@@ -1,7 +1,6 @@
 use super::{comment, target};
 use crate::cluster::ClusterTrait;
-#[cfg(feature = "gust")]
-use crate::cluster::Gust as Cluster;
+use crate::cluster::Shasta;
 use async_graphql::*;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -50,6 +49,7 @@ impl Model {
     }
     pub async fn related(&self, ctx: &Context<'_>) -> Vec<target::Model> {
         let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
+        let cluster = ctx.data::<Shasta>().unwrap();
         let mut related: Vec<target::Model> = vec![];
         let tar = self.target(ctx).await;
         if let Err(e) = tar {
@@ -59,15 +59,15 @@ impl Model {
         let tar = tar.unwrap().unwrap();
         match self.to_offline {
             Some(ToOffline::Card) => {
-                for t in Cluster::siblings(&tar.name) {
-                    if let Some(tmp) = target::Entity::from_name(&t, db).await {
+                for t in cluster.siblings(&tar.name) {
+                    if let Some(tmp) = target::Entity::from_name(&t, db, cluster).await {
                         related.push(tmp);
                     }
                 }
             }
             Some(ToOffline::Blade) => {
-                for t in Cluster::cousins(&tar.name) {
-                    if let Some(tmp) = target::Entity::from_name(&t, db).await {
+                for t in cluster.cousins(&tar.name) {
+                    if let Some(tmp) = target::Entity::from_name(&t, db, cluster).await {
                         related.push(tmp);
                     }
                 }

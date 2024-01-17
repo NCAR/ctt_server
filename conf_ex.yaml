@@ -1,0 +1,6 @@
+poll_interval: 30
+slack:
+  channel: "my-test-channel"
+  token: "xoxb-todo"
+cluster:
+  prefix: "gu"

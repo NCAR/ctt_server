@@ -19,10 +19,16 @@ pub fn get_config(path: Option<String>) -> Result<Conf, ConfigError> {
 pub struct Conf {
     pub poll_interval: u64,
     pub slack: Slack,
+    pub cluster: Cluster,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Slack {
     pub channel: String,
     pub token: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct Cluster {
+    pub prefix: String,
 }

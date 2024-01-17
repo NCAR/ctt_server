@@ -1,7 +1,6 @@
 use super::issue;
 use crate::cluster::ClusterTrait;
-#[cfg(feature = "gust")]
-use crate::cluster::Gust as Cluster;
+use crate::cluster::Shasta;
 use async_graphql::*;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, QueryOrder};
@@ -46,8 +45,8 @@ impl Entity {
         Self::find().order_by_asc(Column::Name)
     }
     #[instrument]
-    pub async fn from_name(name: &str, db: &DatabaseConnection) -> Option<Model> {
-        if !Cluster::real_node(name) {
+    pub async fn from_name(name: &str, db: &DatabaseConnection, cluster: &Shasta) -> Option<Model> {
+        if !cluster.real_node(name) {
             debug!("request node {} is not real", name);
             return None;
         }
@@ -58,7 +57,7 @@ impl Entity {
         }
         let target = target.unwrap();
         if target.is_none() {
-            Self::create_target(name, TargetStatus::Online, db).await
+            Self::create_target(name, TargetStatus::Online, db, cluster).await
         } else {
             target
         }
@@ -79,8 +78,9 @@ impl Entity {
         name: &str,
         state: TargetStatus,
         db: &DatabaseConnection,
+        cluster: &Shasta,
     ) -> Option<Model> {
-        if !Cluster::real_node(name) {
+        if !cluster.real_node(name) {
             warn!("Tried making target for fake node {}", name);
             return None;
         }

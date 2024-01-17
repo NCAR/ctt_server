@@ -1,6 +1,5 @@
 use crate::cluster::ClusterTrait;
-#[cfg(feature = "gust")]
-use crate::cluster::Gust as Cluster;
+use crate::cluster::Shasta;
 use crate::conf::Conf;
 use crate::entities;
 use crate::entities::issue::IssueStatus;
@@ -21,8 +20,10 @@ use tracing::{debug, info, instrument, trace, warn};
 #[instrument(skip(db, conf))]
 pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
     let mut interval = time::interval(Duration::from_secs(conf.poll_interval));
+    let cluster = Shasta::new(conf.cluster.prefix.clone());
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+    #[cfg(feature = "pbs")]
     loop {
         interval.tick().await;
         let db = db.as_ref();
@@ -30,7 +31,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(crate::slack_updater(rx, conf.clone()));
         let pbs_srv = pbs::Server::new();
-        let pbs_node_state = Cluster::nodes_status(&pbs_srv, &tx).await;
+        let pbs_node_state = cluster.nodes_status(&pbs_srv, &tx).await;
         let mut ctt_node_state = get_ctt_nodes(db).await;
 
         //handle any pbs nodes not in ctt
@@ -46,8 +47,17 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         // sync ctt and pbs
         for (target, old_state) in &ctt_node_state {
             if let Some((new_state, pbs_comment)) = pbs_node_state.get(target) {
-                handle_transition(target, pbs_comment, old_state, new_state, &pbs_srv, db, &tx)
-                    .await;
+                handle_transition(
+                    target,
+                    pbs_comment,
+                    old_state,
+                    new_state,
+                    &pbs_srv,
+                    db,
+                    &tx,
+                    &cluster,
+                )
+                .await;
             } else {
                 warn!("{} not found in pbs", target);
                 if let Some(new_issue) = crate::model::NewIssue::new(
@@ -56,8 +66,9 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
                     "Node not found in pbs".to_string(),
                     target.to_string(),
                     None,
+                    &cluster,
                 ) {
-                    mutation::issue_open(&new_issue, "ctt", db, &tx)
+                    mutation::issue_open(&new_issue, "ctt", db, &tx, &cluster)
                         .await
                         .unwrap();
                 }
@@ -86,8 +97,12 @@ pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetSta
 }
 
 #[instrument(skip(db))]
-pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStatus, String) {
-    let t = entities::target::Entity::from_name(target, db).await;
+pub async fn desired_state(
+    target: &str,
+    db: &DatabaseConnection,
+    cluster: &Shasta,
+) -> (TargetStatus, String) {
+    let t = entities::target::Entity::from_name(target, db, cluster).await;
     let t = match t {
         None => return (TargetStatus::Offline, "Not a real node".to_string()),
         Some(t) => {
@@ -105,8 +120,8 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
             t
         }
     };
-    for c in Cluster::siblings(target) {
-        match entities::target::Entity::from_name(&c, db).await {
+    for c in cluster.siblings(target) {
+        match entities::target::Entity::from_name(&c, db, cluster).await {
             None => warn!("expected sibling {} doesn't exist", c),
             Some(t) => {
                 if t.issues()
@@ -123,8 +138,8 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
             }
         };
     }
-    for c in Cluster::cousins(target) {
-        match entities::target::Entity::from_name(&c, db).await {
+    for c in cluster.cousins(target) {
+        match entities::target::Entity::from_name(&c, db, cluster).await {
             None => warn!("expected sibling {} doesn't exist", c),
             Some(t) => {
                 if t.issues()
@@ -157,8 +172,8 @@ pub async fn desired_state(target: &str, db: &DatabaseConnection) -> (TargetStat
 }
 
 #[instrument(skip(db))]
-pub async fn close_open_issues(target: &str, db: &DatabaseConnection) {
-    for issue in entities::target::Entity::from_name(target, db)
+pub async fn close_open_issues(target: &str, db: &DatabaseConnection, cluster: &Shasta) {
+    for issue in entities::target::Entity::from_name(target, db, cluster)
         .await
         .unwrap()
         .issues()
@@ -182,6 +197,8 @@ pub async fn close_open_issues(target: &str, db: &DatabaseConnection) {
 }
 
 #[instrument(skip(pbs_srv, db, tx))]
+#[cfg(feature = "pbs")]
+#[allow(clippy::too_many_arguments)]
 async fn handle_transition(
     target: &str,
     new_comment: &str,
@@ -190,8 +207,9 @@ async fn handle_transition(
     pbs_srv: &pbs::Server,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<String>,
+    cluster: &Shasta,
 ) {
-    let (expected_state, comment) = desired_state(target, db).await;
+    let (expected_state, comment) = desired_state(target, db, cluster).await;
 
     //dont use old_state to figure out how to handle nodes
     //things could have changed between when it was collected and now, so only consider
@@ -208,9 +226,10 @@ async fn handle_transition(
                     new_comment.to_string(),
                     target.to_string(),
                     None,
+                    cluster,
                 ) {
                     info!("opening issue for {}: {}", target, new_comment);
-                    mutation::issue_open(&new_issue, "ctt", db, tx)
+                    mutation::issue_open(&new_issue, "ctt", db, tx, cluster)
                         .await
                         .unwrap();
                 }
@@ -222,7 +241,8 @@ async fn handle_transition(
             TargetStatus::Offline => TargetStatus::Offline,
             state => {
                 info!("{} found in state {:?}, expected offline", target, state);
-                Cluster::offline_node(target, &comment, "ctt", pbs_srv, tx)
+                cluster
+                    .offline_node(target, &comment, "ctt", pbs_srv, tx)
                     .await
                     .unwrap();
                 if *state == TargetStatus::Down {
@@ -245,7 +265,7 @@ async fn handle_transition(
                         target
                     ))
                     .await;
-                close_open_issues(target, db).await;
+                close_open_issues(target, db, cluster).await;
                 TargetStatus::Online
             }
         },
@@ -256,7 +276,8 @@ async fn handle_transition(
             "{}: current: {:?}, expected: {:?}, final: {:?}",
             target, new_state, expected_state, final_state
         );
-        let node = if let Some(tmp) = entities::target::Entity::from_name(target, db).await {
+        let node = if let Some(tmp) = entities::target::Entity::from_name(target, db, cluster).await
+        {
             tmp
         } else {
             warn!("trying to update state for fake node {}", target);
