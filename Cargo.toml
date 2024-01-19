@@ -42,6 +42,6 @@ auth = []
 
 [package.metadata.generate-rpm]
 assets = [
-    { source = "target/release/pbs_cmds", dest = "/opt/ncar/sbin/ctt_server", mode = "755" },
+    { source = "target/release/ctt_server", dest = "/opt/ncar/sbin/ctt_server", mode = "755" },
 ]
 

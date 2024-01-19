@@ -1,5 +1,5 @@
 name: Gitea Actions Demo
-run-name: pbs_cmds packaging
+run-name: ctt_server packaging
 on: 
   push:
     branches:
