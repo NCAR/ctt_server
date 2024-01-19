@@ -42,6 +42,8 @@ auth = []
 
 [package.metadata.generate-rpm]
 assets = [
-    { source = "target/release/ctt_server", dest = "/opt/ncar/sbin/ctt_server", mode = "755" },
+    { source = "target/release/ctt_server", dest = "/opt/ncar/bin/ctt_server", mode = "755" },
+    { source = "conf_ex.yaml", dest = "/opt/ncar/etc/ctt/conf_ex.yaml", mode = "644" },
+    { source = "ctt_server.service", dest = "/opt/ncar/systemd/ctt_server.service", mode = "644" },
 ]
 
