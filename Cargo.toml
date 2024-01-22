@@ -1,6 +1,6 @@
 [package]
 name = "ctt_server"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Graphql api for CTT"
@@ -41,9 +41,10 @@ auth = []
 
 
 [package.metadata.generate-rpm]
+pre_install_script = "mkdir -p /opt/ncar/var/ctt && chown -R ctt:ssg /opt/ncar/var/ctt"
 assets = [
     { source = "target/release/ctt_server", dest = "/opt/ncar/bin/ctt_server", mode = "755" },
-    { source = "conf_ex.yaml", dest = "/opt/ncar/etc/ctt/conf_ex.yaml", mode = "644" },
+    { source = "conf_ex.yaml", dest = "/opt/ncar/etc/ctt/conf_ex.yaml", mode = "644", config = true },
     { source = "ctt_server.service", dest = "/opt/ncar/systemd/ctt_server.service", mode = "644" },
 ]
 
