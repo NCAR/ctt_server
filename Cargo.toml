@@ -1,6 +1,6 @@
 [package]
-name = "ctt_server"
-version = "0.1.1"
+name = "cttd"
+version = "0.1.2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Graphql api for CTT"
@@ -13,7 +13,7 @@ async-trait = "0.1"
 axum = "0.7"
 axum-server = { version = "0.6", features = ["tls-rustls"] }
 chrono = {version = "0.4", features = ["serde"] }
-config = "0.13"
+config = "0.14"
 futures-util = "0.3"
 http = "1"
 http-body = "1"
@@ -26,7 +26,7 @@ sea-orm = { version="0.12", features = ["with-chrono", "sqlx-sqlite", "runtime-t
 sea-orm-migration = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-slack-morphism = { version = "1", features = ["axum"], optional = true}
+slack-morphism = { version = "2", features = ["axum"], optional = true}
 tokio = {version = "1", features = ["full"] }
 tower = { version = "0.4", features = ["timeout"] }
 tower-http = { version = "0.5", features = ["trace", "auth", "validate-request"] }
@@ -41,10 +41,9 @@ auth = []
 
 
 [package.metadata.generate-rpm]
-pre_install_script = "mkdir -p /opt/ncar/var/ctt && chown -R ctt:ssg /opt/ncar/var/ctt"
 assets = [
-    { source = "target/release/ctt_server", dest = "/opt/ncar/bin/ctt_server", mode = "755" },
+    { source = "target/release/cttd", dest = "/opt/ncar/bin/cttd", mode = "755" },
     { source = "conf_ex.yaml", dest = "/opt/ncar/etc/ctt/conf_ex.yaml", mode = "644", config = true },
-    { source = "ctt_server.service", dest = "/opt/ncar/systemd/ctt_server.service", mode = "644" },
+    { source = "cttd.service", dest = "/opt/ncar/systemd/cttd.service", mode = "644" },
 ]
 

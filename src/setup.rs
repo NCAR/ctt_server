@@ -1,12 +1,13 @@
 use crate::migrator::Migrator;
 use sea_orm::*;
 use sea_orm_migration::{MigratorTrait, SchemaManager};
+use std::fs::File;
 
-const DATABASE_URL: &str = "sqlite:///root/shanks/ctt/db.sqlite";
-//const DB_NAME: &str = "mydb";
-
-pub async fn setup_and_connect() -> Result<DatabaseConnection, DbErr> {
-    let db = Database::connect(DATABASE_URL).await.unwrap();
+pub async fn setup_and_connect(db_url: &str) -> Result<DatabaseConnection, DbErr> {
+    let _ = File::open(db_url).unwrap_or_else(|_| File::create(db_url).unwrap());
+    let db = Database::connect(format!("sqlite://{}", db_url))
+        .await
+        .unwrap();
     let db = match db.get_database_backend() {
         /*
         DbBackend::MySql => {

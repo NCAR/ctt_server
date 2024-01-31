@@ -20,6 +20,8 @@ pub struct Conf {
     pub poll_interval: u64,
     pub slack: Slack,
     pub cluster: Cluster,
+    pub db: String,
+    pub certs_dir: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

@@ -90,7 +90,7 @@ enum CttEvent {
 #[cfg(feature = "slack")]
 #[instrument(skip(conf))]
 async fn slack_updater(mut rx: mpsc::Receiver<String>, conf: Conf) {
-    let connector = SlackClientHyperConnector::new();
+    let connector = SlackClientHyperConnector::new().unwrap();
     let client = SlackClient::new(connector);
     let token_value: SlackApiTokenValue = conf.slack.token.into();
     let token: SlackApiToken = SlackApiToken::new(token_value);
@@ -142,7 +142,7 @@ async fn main() {
         std::process::exit(1);
     }));
     let conf_file = env::args().nth(1);
-    let conf = conf::get_config(conf_file).unwrap();
+    let conf = conf::get_config(conf_file).expect("Error reading config file");
     CONFIG.set(conf.clone()).unwrap();
     let stdout_log = fmt::layer().pretty().with_writer(std::io::stderr);
     let registry = tracing_subscriber::registry().with(
@@ -155,7 +155,7 @@ async fn main() {
     );
     tracing::subscriber::set_global_default(registry).unwrap();
 
-    let db = Arc::new(setup_and_connect().await.unwrap());
+    let db = Arc::new(setup_and_connect(&conf.db).await.unwrap());
 
     let schema = Schema::build(model::Query, model::Mutation, EmptySubscription)
         .extension(Tracing)
@@ -166,12 +166,8 @@ async fn main() {
     // configure certificate and private key used by https
     let config = RustlsConfig::from_pem_file(
         //PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        PathBuf::from("/root/shanks/ctt/")
-            .join("certs")
-            .join("cert.pem"),
-        PathBuf::from("/root/shanks/ctt/")
-            .join("certs")
-            .join("key.pem"),
+        PathBuf::from(conf.certs_dir.clone()).join("cert.pem"),
+        PathBuf::from(conf.certs_dir.clone()).join("key.pem"),
     )
     .await
     .unwrap();

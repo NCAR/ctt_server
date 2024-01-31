@@ -4,3 +4,5 @@ slack:
   token: "xoxb-todo"
 cluster:
   prefix: "gu"
+db: "/var/ctt/db.sqlite"
+certs_dir: "/etc/ctt/certs"
