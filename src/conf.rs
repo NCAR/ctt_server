@@ -22,6 +22,7 @@ pub struct Conf {
     pub cluster: Cluster,
     pub db: String,
     pub certs_dir: String,
+    pub server_addr: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

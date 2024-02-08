@@ -6,3 +6,4 @@ cluster:
   prefix: "gu"
 db: "/var/ctt/db.sqlite"
 certs_dir: "/etc/ctt/certs"
+server_addr: "127.0.0.1:8080"

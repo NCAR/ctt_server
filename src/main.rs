@@ -1,4 +1,5 @@
 #![feature(let_chains)]
+#![feature(addr_parse_ascii)]
 mod cluster;
 mod conf;
 mod entities;
@@ -194,10 +195,8 @@ async fn main() {
                 .timeout(Duration::from_secs(10)),
         );
 
-    //info!("GraphiQL IDE: https://localhost:8000");
-
     // run https server
-    let addr = SocketAddr::from(([10, 13, 0, 16], 8000));
+    let addr = SocketAddr::parse_ascii(conf.server_addr.as_bytes()).unwrap();
     axum_server::bind_rustls(addr, config)
         .handle(handle)
         .serve(app.into_make_service())
