@@ -22,7 +22,7 @@ impl Shasta {
 impl ClusterTrait for Shasta {
     fn siblings(&self, target: &str) -> Vec<String> {
         //TODO should be "guc" not "gu"
-        if let Some(val) = target.strip_prefix(&self.prefix) {
+        if let Some(val) = target.strip_prefix(&format!("{}c", self.prefix)) {
             let num: u32 = FromStr::from_str(val).unwrap();
             //TODO add sanity check, only 18ish nodes in gust
             let blade_start = (((num - 1) / 2) * 2) + 1;
@@ -35,6 +35,18 @@ impl ClusterTrait for Shasta {
             cousins
         } else if let Some(val) = target.strip_prefix(&format!("{}g", self.prefix)) {
             vec![target.to_string()]
+        } else if let Some(val) = target.strip_prefix(&self.prefix) {
+            // same code as if, special case for gust pre renaming
+            let num: u32 = FromStr::from_str(val).unwrap();
+            //TODO add sanity check, only 18ish nodes in gust
+            let blade_start = (((num - 1) / 2) * 2) + 1;
+            //println!("target: {}, blade_start: {}", num, blade_start);
+            let mut cousins = Vec::with_capacity(2);
+            for i in blade_start..blade_start + 2 {
+                //TODO should be guc
+                cousins.push(format!("{}{:0>4}", self.prefix, i));
+            }
+            cousins
         } else {
             warn!("{} is not a {} node", target, self.prefix);
             vec![target.to_string()]
@@ -42,7 +54,7 @@ impl ClusterTrait for Shasta {
     }
     fn cousins(&self, target: &str) -> Vec<String> {
         //TODO should be "guc" not "gu"
-        if let Some(val) = target.strip_prefix(&self.prefix) {
+        if let Some(val) = target.strip_prefix(&format!("{}c", self.prefix)) {
             let num: u32 = FromStr::from_str(val).unwrap();
             //TODO add sanity check, only 18ish nodes in gust
             let blade_start = (((num - 1) / 4) * 4) + 1;
@@ -59,6 +71,17 @@ impl ClusterTrait for Shasta {
             let mut cousins = Vec::with_capacity(2);
             for i in blade_start..blade_start + 2 {
                 cousins.push(format!("{}g{:0>4}", self.prefix, i));
+            }
+            cousins
+        } else if let Some(val) = target.strip_prefix(&self.prefix) {
+            // same code as if, special case for gust pre renaming
+            let num: u32 = FromStr::from_str(val).unwrap();
+            //TODO add sanity check, only 18ish nodes in gust
+            let blade_start = (((num - 1) / 4) * 4) + 1;
+            let mut cousins = Vec::with_capacity(4);
+            for i in blade_start..blade_start + 4 {
+                //TODO should be guc
+                cousins.push(format!("{}{:0>4}", self.prefix, i));
             }
             cousins
         } else {
