@@ -5,6 +5,7 @@ use crate::entities::comment;
 use crate::entities::issue::{self, IssueStatus};
 use crate::entities::prelude::*;
 use crate::entities::target::{self, TargetStatus};
+use crate::pbs_sync::PBS_LOCK;
 use async_graphql::{Context, InputObject, Object, Result};
 #[cfg(feature = "pbs")]
 use pbs::Server;
@@ -71,6 +72,7 @@ async fn issue_update(
     let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
     let cluster = ctx.data::<Shasta>().unwrap();
     let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
+    let sched_lock = PBS_LOCK.lock().await;
     let issue = Issue::find_by_id(i.id).one(db).await.unwrap();
     if issue.is_none() {
         return Err(format!("Issue {} not found", i.id));
@@ -178,7 +180,9 @@ async fn issue_update(
         cluster,
     )
     .await;
-    Ok(Issue::find_by_id(i.id).one(db).await.unwrap().unwrap())
+    let ret = Ok(Issue::find_by_id(i.id).one(db).await.unwrap().unwrap());
+    drop(sched_lock);
+    ret
 }
 
 #[instrument]
@@ -314,6 +318,7 @@ pub async fn issue_open(
         warn!("Target {} not found", i.target);
         return Err(format!("Node {} does not exist", i.target));
     };
+    let sched_lock = PBS_LOCK.lock().await;
     if let Some(i) = target
         .issues()
         .filter(issue::Column::Status.eq(IssueStatus::Open))
@@ -369,6 +374,7 @@ pub async fn issue_open(
         ..Default::default()
     };
     c.insert(db).await.unwrap();
+    drop(sched_lock);
     Ok(new_issue)
 }
 
@@ -381,6 +387,7 @@ async fn issue_close(
 ) -> Result<String, String> {
     let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
     let cluster = ctx.data::<Shasta>().unwrap();
+    let sched_lock = PBS_LOCK.lock().await;
     let issue = Issue::find_by_id(cttissue).one(db).await.unwrap().unwrap();
     let target = issue.target(ctx).await.unwrap().unwrap();
     if issue.status == IssueStatus::Open {
@@ -407,6 +414,7 @@ async fn issue_close(
             .await;
         check_blade(&target.name, db, tx, cluster).await;
     }
+    drop(sched_lock);
     Ok(format!("closed {}", cttissue))
 }
 

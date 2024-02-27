@@ -13,9 +13,13 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use sea_orm::DatabaseConnection;
+use std::sync::LazyLock;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{debug, info, instrument, trace, warn};
+
+pub static PBS_LOCK: LazyLock<Mutex<u32>> = LazyLock::new(|| Mutex::new(0));
 
 #[instrument(skip(db, conf))]
 pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
@@ -31,6 +35,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(crate::slack_updater(rx, conf.clone()));
         let pbs_srv = pbs::Server::new();
+        let sched_lock = PBS_LOCK.lock().await;
         let pbs_node_state = cluster.nodes_status(&pbs_srv, &tx).await;
         let mut ctt_node_state = get_ctt_nodes(db).await;
 
@@ -74,6 +79,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
                 }
             }
         }
+        drop(sched_lock);
         debug!("pbs sync complete");
     }
 }

@@ -1,5 +1,6 @@
 #![feature(let_chains)]
 #![feature(addr_parse_ascii)]
+#![feature(lazy_cell)]
 mod cluster;
 mod conf;
 mod entities;
@@ -134,7 +135,7 @@ async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (St
     )
 }
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 #[instrument]
 async fn main() {
     let default_panic = std::panic::take_hook();

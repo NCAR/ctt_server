@@ -18,6 +18,6 @@ jobs:
       - name: Strip
         run: strip -s target/release/cttd
       - name: Build rpm
-        run: cargo generate-rpm --auto-req no
+        run: cargo generate-rpm --auto-req disabled
       - name: publish to gitea
         run: curl --user shanks:${{ secrets.PACKAGING_TOKEN }} --upload-file target/generate-rpm/cttd-*.rpm https://git.hsg.ucar.edu/api/packages/shanks/rpm/upload

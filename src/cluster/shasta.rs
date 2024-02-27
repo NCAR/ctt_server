@@ -30,7 +30,7 @@ impl ClusterTrait for Shasta {
             let mut cousins = Vec::with_capacity(2);
             for i in blade_start..blade_start + 2 {
                 //TODO should be guc
-                cousins.push(format!("{}{:0>4}", self.prefix, i));
+                cousins.push(format!("{}c{:0>4}", self.prefix, i));
             }
             cousins
         } else if let Some(val) = target.strip_prefix(&format!("{}g", self.prefix)) {
@@ -61,13 +61,13 @@ impl ClusterTrait for Shasta {
             let mut cousins = Vec::with_capacity(4);
             for i in blade_start..blade_start + 4 {
                 //TODO should be guc
-                cousins.push(format!("{}{:0>4}", self.prefix, i));
+                cousins.push(format!("{}c{:0>4}", self.prefix, i));
             }
             cousins
         } else if let Some(val) = target.strip_prefix(&format!("{}g", self.prefix)) {
             let num: u32 = FromStr::from_str(val).unwrap();
             //TODO add sanity check, only 18ish nodes in gust
-            let blade_start = ((num / 2) * 2) + 1;
+            let blade_start = (((num - 1) / 2) * 2) + 1;
             let mut cousins = Vec::with_capacity(2);
             for i in blade_start..blade_start + 2 {
                 cousins.push(format!("{}g{:0>4}", self.prefix, i));
@@ -92,13 +92,14 @@ impl ClusterTrait for Shasta {
     #[instrument]
     fn real_node(&self, target: &str) -> bool {
         if let Some(val) = target.strip_prefix(&self.prefix) {
-            if val.len() == 4 {
-                if let Ok(num) = val.parse::<u32>() {
-                    return num <= 18 && num > 0;
-                }
-            }
+            true
+        } else if let Some(val) = target.strip_prefix(&format!("{}c", &self.prefix)) {
+            true
+        } else if let Some(val) = target.strip_prefix(&format!("{}g", &self.prefix)) {
+            true
+        } else {
+            false
         }
-        false
     }
 
     #[instrument(skip(pbs_srv))]

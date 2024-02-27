@@ -216,7 +216,6 @@ impl RoleChecker {
     }
 }
 
-#[async_trait::async_trait]
 impl Guard for RoleChecker {
     async fn check(&self, ctx: &Context<'_>) -> Result<()> {
         if ctx.data_opt::<RoleGuard>().ok_or("no role")?.role == self.role {
