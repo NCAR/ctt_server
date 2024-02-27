@@ -38,6 +38,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         let sched_lock = PBS_LOCK.lock().await;
         let pbs_node_state = cluster.nodes_status(&pbs_srv, &tx).await;
         let mut ctt_node_state = get_ctt_nodes(db).await;
+        drop(sched_lock);
 
         //handle any pbs nodes not in ctt
         pbs_node_state
@@ -79,8 +80,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
                 }
             }
         }
-        drop(sched_lock);
-        debug!("pbs sync complete");
+        info!("pbs sync complete");
     }
 }
 
