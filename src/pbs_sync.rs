@@ -30,15 +30,14 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
     #[cfg(feature = "pbs")]
     loop {
         interval.tick().await;
+        let sched_lock = PBS_LOCK.lock().await;
         let db = db.as_ref();
         info!("performing sync with pbs");
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(crate::slack_updater(rx, conf.clone()));
         let pbs_srv = pbs::Server::new();
-        let sched_lock = PBS_LOCK.lock().await;
         let pbs_node_state = cluster.nodes_status(&pbs_srv, &tx).await;
         let mut ctt_node_state = get_ctt_nodes(db).await;
-        drop(sched_lock);
 
         //handle any pbs nodes not in ctt
         pbs_node_state
@@ -81,6 +80,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
             }
         }
         info!("pbs sync complete");
+        drop(sched_lock);
     }
 }
 
