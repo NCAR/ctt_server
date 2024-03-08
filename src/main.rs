@@ -193,7 +193,7 @@ async fn main() {
                 // too long so we must handle those
                 .layer(tower_http::trace::TraceLayer::new_for_http())
                 .layer(HandleErrorLayer::new(handle_timeout))
-                .timeout(Duration::from_secs(10)),
+                .timeout(Duration::from_secs(30)),
         );
 
     // run https server
