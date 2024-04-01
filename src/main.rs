@@ -146,7 +146,7 @@ async fn main() {
     let conf_file = env::args().nth(1);
     let conf = conf::get_config(conf_file).expect("Error reading config file");
     CONFIG.set(conf.clone()).unwrap();
-    let stdout_log = fmt::layer().pretty().with_writer(std::io::stderr);
+    let stdout_log = fmt::layer().json().with_writer(std::io::stderr);
     let registry = tracing_subscriber::registry().with(
         stdout_log.with_filter(
             Targets::new()

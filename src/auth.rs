@@ -202,7 +202,7 @@ impl RoleGuard {
         Self {
             role,
             user,
-            exp: exp.timestamp() as usize,
+            exp: exp.and_utc().timestamp() as usize,
         }
     }
 }
