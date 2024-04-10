@@ -108,7 +108,7 @@ impl ClusterTrait for Shasta {
         &self,
         pbs_srv: &pbs::Server,
         tx: &mpsc::Sender<String>,
-    ) -> HashMap<String, (TargetStatus, String)> {
+    ) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
         scheduler::nodes_status(pbs_srv, tx).await
     }
     async fn release_node(

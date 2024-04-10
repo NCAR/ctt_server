@@ -38,6 +38,11 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         let pbs_srv = pbs::Server::new();
         let pbs_node_state = cluster.nodes_status(&pbs_srv, &tx).await;
         let mut ctt_node_state = get_ctt_nodes(db).await;
+        if pbs_node_state.is_err() {
+            warn!("could not get node state from cluster");
+            continue;
+        }
+        let pbs_node_state = pbs_node_state.unwrap();
 
         //handle any pbs nodes not in ctt
         pbs_node_state

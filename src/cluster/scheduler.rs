@@ -10,14 +10,18 @@ use tracing::{info, warn};
 pub async fn nodes_status(
     pbs_srv: &Server,
     tx: &mpsc::Sender<String>,
-) -> HashMap<String, (TargetStatus, String)> {
+) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
     //TODO filter stat attribs (just need hostname, jobs, and state)
     //TODO need to handle err
     //TODO consider calling pbs_srv.stat_vnode from a spawn_blocking task
     //TODO add a timeout
     let mut resp = HashMap::new();
     #[cfg(feature = "pbs")]
-    for n in pbs_srv.stat_vnode(&None, None).unwrap().resources.iter() {
+    let vnode_stat = pbs_srv.stat_vnode(&None, None);
+    if vnode_stat.is_err() {
+        return Err(());
+    }
+    for n in vnode_stat.unwrap().resources.iter() {
         let name = n.name();
         let jobs = {
             if let Some(Attrl::Value(Op::Default(j))) = n.attribs().get("jobs") {
@@ -79,7 +83,7 @@ pub async fn nodes_status(
         };
         resp.insert(name, (state, comment.to_string()));
     }
-    resp
+    Ok(resp)
 }
 
 pub async fn release_node(
@@ -90,7 +94,9 @@ pub async fn release_node(
 ) -> Result<(), ()> {
     info!("{} resuming node {}", operator, target);
     #[cfg(feature = "pbs")]
-    pbs_srv.clear_vnode(target, Some("")).unwrap();
+    if pbs_srv.clear_vnode(target, Some("")).is_err() {
+        return Err(());
+    }
     let _ = tx
         .send(format!("{} onlining node: {}", operator, target))
         .await;
@@ -106,7 +112,9 @@ pub async fn offline_node(
 ) -> Result<(), ()> {
     info!("{} offlining: {}, {}", operator, target, comment);
     #[cfg(feature = "pbs")]
-    pbs_srv.offline_vnode(target, Some(comment)).unwrap();
+    if pbs_srv.offline_vnode(target, Some(comment)).is_err() {
+        return Err(());
+    }
     let _ = tx
         .send(format!("{} offlining: {}, {}", operator, target, comment))
         .await;

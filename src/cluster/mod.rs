@@ -10,7 +10,7 @@ pub trait ClusterTrait {
         &self,
         pbs_srv: &pbs::Server,
         tx: &mpsc::Sender<String>,
-    ) -> HashMap<String, (TargetStatus, String)>;
+    ) -> Result<HashMap<String, (TargetStatus, String)>, ()>;
     async fn release_node(
         &self,
         target: &str,

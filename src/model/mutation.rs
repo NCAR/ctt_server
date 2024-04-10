@@ -146,7 +146,7 @@ async fn issue_update(
         #[cfg(feature = "pbs")]
         {
             let srv = Server::new();
-            let status = srv.stat_host(&None, None).unwrap();
+            let status = srv.stat_host(&None, None)?;
             let target = issue.target(ctx).await.unwrap().unwrap();
             for t in to_offline(&target.name, status, i.to_offline, cluster).into_iter() {
                 srv.offline_vnode(
@@ -155,8 +155,7 @@ async fn issue_update(
                         "{} sibling",
                         &issue.target(ctx).await.unwrap().unwrap().name
                     )),
-                )
-                .unwrap();
+                )?;
                 let mut sib: target::ActiveModel =
                     Target::from_name(&t, db, cluster).await.unwrap().into();
                 sib.status = ActiveValue::Set(TargetStatus::Draining);
@@ -197,9 +196,13 @@ async fn check_blade(
         let srv = Server::new();
         let nodes = cluster.cousins(target);
         // current status of nodes in blade
-        let current_status: HashMap<String, (TargetStatus, String)> = cluster
-            .nodes_status(&srv, tx)
-            .await
+        let current_status = cluster.nodes_status(&srv, tx).await;
+        if current_status.is_err() {
+            warn!("issue getting nodes status");
+            return;
+        }
+        let current_status: HashMap<String, (TargetStatus, String)> = current_status
+            .unwrap()
             .into_iter()
             .filter(|n| nodes.iter().any(|t| n.0.eq(t)))
             .collect();
@@ -215,11 +218,13 @@ async fn check_blade(
             let final_state = match expected_state {
                 TargetStatus::Draining => panic!("Expected state is never Draining"),
                 TargetStatus::Online => {
-                    if new_state != TargetStatus::Online {
-                        cluster
+                    if new_state != TargetStatus::Online
+                        && cluster
                             .release_node(&target, "ctt", &srv, tx)
                             .await
-                            .unwrap();
+                            .is_err()
+                    {
+                        warn!("could not release node {}", &target);
                     }
                     TargetStatus::Online
                 }
@@ -227,10 +232,13 @@ async fn check_blade(
                     TargetStatus::Draining => TargetStatus::Draining,
                     TargetStatus::Offline => TargetStatus::Offline,
                     state => {
-                        cluster
+                        if cluster
                             .offline_node(&target, &comment, "ctt", &srv, tx)
                             .await
-                            .unwrap();
+                            .is_err()
+                        {
+                            warn!("could not release node {}", &target);
+                        }
                         if state == TargetStatus::Down {
                             TargetStatus::Offline
                         } else {
@@ -331,10 +339,9 @@ pub async fn issue_open(
     #[cfg(feature = "pbs")]
     {
         let srv = Server::new();
-        let status = srv.stat_host(&None, None).unwrap();
+        let status = srv.stat_host(&None, None)?;
         for t in to_offline(&i.target, status, i.to_offline, cluster).into_iter() {
-            srv.offline_vnode(&t, Some(&format!("{} sibling", &i.target)))
-                .unwrap();
+            srv.offline_vnode(&t, Some(&format!("{} sibling", &i.target)))?;
             let mut sib: target::ActiveModel =
                 Target::from_name(&t, db, cluster).await.unwrap().into();
             sib.status = ActiveValue::Set(TargetStatus::Draining);
