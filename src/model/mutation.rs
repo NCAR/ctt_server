@@ -7,6 +7,7 @@ use crate::entities::prelude::*;
 use crate::entities::target::{self, TargetStatus};
 use crate::pbs_sync::PBS_LOCK;
 use async_graphql::{Context, InputObject, Object, Result};
+use chrono::Utc;
 #[cfg(feature = "pbs")]
 use pbs::Server;
 use sea_orm::entity::ActiveValue;
@@ -171,6 +172,7 @@ async fn issue_update(
         }
     }
     info!("Updating issue {}: {:?}", issue.id, updated_issue);
+    updated_issue.updated_at = ActiveValue::Set(Utc::now().naive_utc());
     updated_issue.update(db).await.unwrap();
     check_blade(
         &issue.target(ctx).await.unwrap().unwrap().name,
