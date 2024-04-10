@@ -95,10 +95,11 @@ impl ClusterTrait for Shasta {
             true
         } else if let Some(val) = target.strip_prefix(&format!("{}c", &self.prefix)) {
             true
-        } else if let Some(val) = target.strip_prefix(&format!("{}g", &self.prefix)) {
-            true
         } else {
-            false
+            matches!(
+                target.strip_prefix(&format!("{}g", &self.prefix)),
+                Some(val)
+            )
         }
     }
 

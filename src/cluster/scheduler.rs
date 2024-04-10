@@ -26,6 +26,7 @@ pub async fn nodes_status(
                 false
             }
         };
+        #[allow(clippy::manual_unwrap_or_default)]
         let comment =
             if let Some(pbs::Attrl::Value(pbs::Op::Default(c))) = n.attribs().get("comment") {
                 c
