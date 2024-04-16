@@ -1,6 +1,6 @@
 use super::{comment, target};
 use crate::cluster::ClusterTrait;
-use crate::cluster::Shasta;
+use crate::cluster::RegexCluster;
 use async_graphql::*;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -49,7 +49,7 @@ impl Model {
     }
     pub async fn related(&self, ctx: &Context<'_>) -> Vec<target::Model> {
         let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
-        let cluster = ctx.data::<Shasta>().unwrap();
+        let cluster = ctx.data::<RegexCluster>().unwrap();
         let mut related: Vec<target::Model> = vec![];
         let tar = self.target(ctx).await;
         if let Err(e) = tar {

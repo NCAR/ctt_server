@@ -20,7 +20,7 @@ use axum::{
 };
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
-use cluster::Shasta;
+use cluster::RegexCluster;
 use http::StatusCode;
 use setup::setup_and_connect;
 #[cfg(feature = "slack")]
@@ -162,7 +162,7 @@ async fn main() {
     let schema = Schema::build(model::Query, model::Mutation, EmptySubscription)
         .extension(Tracing)
         .data(db.clone())
-        .data(Shasta::new(conf.cluster.prefix.clone()))
+        .data(RegexCluster::new(conf.node_types.clone()))
         .finish();
 
     // configure certificate and private key used by https

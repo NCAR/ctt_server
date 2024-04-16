@@ -7,3 +7,7 @@ cluster:
 db: "/var/ctt/db.sqlite"
 certs_dir: "/etc/ctt/certs"
 server_addr: "127.0.0.1:8080"
+node_types: 
+  - { prefix: "gug", digits: 4, slot: 2 }
+  - { prefix:"guc", digits: 4, board: 2, slot: 4}
+

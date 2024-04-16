@@ -1,5 +1,5 @@
 use crate::cluster::ClusterTrait;
-use crate::cluster::Shasta;
+use crate::cluster::RegexCluster;
 use crate::conf::Conf;
 use crate::entities;
 use crate::entities::issue::IssueStatus;
@@ -24,7 +24,7 @@ pub static PBS_LOCK: LazyLock<Mutex<u32>> = LazyLock::new(|| Mutex::new(0));
 #[instrument(skip(db, conf))]
 pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
     let mut interval = time::interval(Duration::from_secs(conf.poll_interval));
-    let cluster = Shasta::new(conf.cluster.prefix.clone());
+    let cluster = RegexCluster::new(conf.node_types.clone());
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     #[cfg(feature = "pbs")]
@@ -111,7 +111,7 @@ pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetSta
 pub async fn desired_state(
     target: &str,
     db: &DatabaseConnection,
-    cluster: &Shasta,
+    cluster: &RegexCluster,
 ) -> (TargetStatus, String) {
     let t = entities::target::Entity::from_name(target, db, cluster).await;
     let t = match t {
@@ -183,7 +183,7 @@ pub async fn desired_state(
 }
 
 #[instrument(skip(db))]
-pub async fn close_open_issues(target: &str, db: &DatabaseConnection, cluster: &Shasta) {
+pub async fn close_open_issues(target: &str, db: &DatabaseConnection, cluster: &RegexCluster) {
     for issue in entities::target::Entity::from_name(target, db, cluster)
         .await
         .unwrap()
@@ -218,7 +218,7 @@ async fn handle_transition(
     pbs_srv: &pbs::Server,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<String>,
-    cluster: &Shasta,
+    cluster: &RegexCluster,
 ) {
     let (expected_state, comment) = desired_state(target, db, cluster).await;
 

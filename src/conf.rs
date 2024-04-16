@@ -19,10 +19,10 @@ pub fn get_config(path: Option<String>) -> Result<Conf, ConfigError> {
 pub struct Conf {
     pub poll_interval: u64,
     pub slack: Slack,
-    pub cluster: Cluster,
     pub db: String,
     pub certs_dir: String,
     pub server_addr: String,
+    pub node_types: Vec<NodeType>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -32,6 +32,11 @@ pub struct Slack {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct Cluster {
+pub struct NodeType {
     pub prefix: String,
+    pub digits: Option<usize>,
+    pub board: Option<u32>,
+    pub first_num: Option<u32>,
+    pub last_num: Option<u32>,
+    pub slot: Option<u32>,
 }

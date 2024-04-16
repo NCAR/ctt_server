@@ -33,6 +33,7 @@ tower-http = { version = "0.5", features = ["trace", "auth", "validate-request"]
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 users = "0.11"
+regex = "1"
 
 [features]
 default = ["pbs", "slack", "auth"]

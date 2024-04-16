@@ -1,5 +1,5 @@
 use crate::auth::{Role, RoleChecker, RoleGuard};
-use crate::cluster::{ClusterTrait, Shasta};
+use crate::cluster::{ClusterTrait, RegexCluster};
 use crate::entities;
 use crate::entities::comment;
 use crate::entities::issue::{self, IssueStatus};
@@ -45,7 +45,7 @@ impl NewIssue {
         title: String,
         target: String,
         to_offline: Option<issue::ToOffline>,
-        cluster: &Shasta,
+        cluster: &RegexCluster,
     ) -> Option<Self> {
         if cluster.real_node(&target) {
             Some(Self {
@@ -71,7 +71,7 @@ async fn issue_update(
     ctx: &Context<'_>,
 ) -> Result<issue::Model, String> {
     let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
-    let cluster = ctx.data::<Shasta>().unwrap();
+    let cluster = ctx.data::<RegexCluster>().unwrap();
     let tx = &ctx.data_opt::<mpsc::Sender<String>>().unwrap();
     let issue = Issue::find_by_id(i.id).one(db).await.unwrap();
     if issue.is_none() {
@@ -188,7 +188,7 @@ async fn check_blade(
     target: &str,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<String>,
-    cluster: &Shasta,
+    cluster: &RegexCluster,
 ) {
     debug!("Checking blade status for {}", target);
     #[cfg(feature = "pbs")]
@@ -277,7 +277,11 @@ async fn check_blade(
 }
 
 #[instrument]
-fn node_group(target: &str, group: Option<issue::ToOffline>, cluster: &Shasta) -> Vec<String> {
+fn node_group(
+    target: &str,
+    group: Option<issue::ToOffline>,
+    cluster: &RegexCluster,
+) -> Vec<String> {
     match group {
         None => vec![],
         Some(issue::ToOffline::Blade) => cluster.cousins(target),
@@ -294,7 +298,7 @@ fn to_offline(
     target: &str,
     status: pbs::StatResp,
     group: Option<issue::ToOffline>,
-    cluster: &Shasta,
+    cluster: &RegexCluster,
 ) -> Vec<String> {
     let to_offline = node_group(target, group, cluster);
     status
@@ -317,7 +321,7 @@ pub async fn issue_open(
     operator: &str,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<String>,
-    cluster: &Shasta,
+    cluster: &RegexCluster,
 ) -> Result<issue::Model, String> {
     let target = if let Some(t) = Target::from_name(&i.target, db, cluster).await {
         t
@@ -390,7 +394,7 @@ async fn issue_close(
     ctx: &Context<'_>,
 ) -> Result<String, String> {
     let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
-    let cluster = ctx.data::<Shasta>().unwrap();
+    let cluster = ctx.data::<RegexCluster>().unwrap();
     let issue = Issue::find_by_id(cttissue).one(db).await.unwrap().unwrap();
     let target = issue.target(ctx).await.unwrap().unwrap();
     if issue.status == IssueStatus::Open {
@@ -429,7 +433,7 @@ impl Mutation {
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = ctx.data_opt::<mpsc::Sender<String>>().unwrap();
         let db = ctx.data_opt::<Arc<DatabaseConnection>>().unwrap().as_ref();
-        let cluster = ctx.data::<Shasta>().unwrap();
+        let cluster = ctx.data::<RegexCluster>().unwrap();
         let ret = issue_open(&issue, usr, db, tx, cluster).await;
         drop(sched_lock);
         ret

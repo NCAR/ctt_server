@@ -1,6 +1,6 @@
 use super::issue;
 use crate::cluster::ClusterTrait;
-use crate::cluster::Shasta;
+use crate::cluster::RegexCluster;
 use async_graphql::*;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, QueryOrder};
@@ -45,7 +45,11 @@ impl Entity {
         Self::find().order_by_asc(Column::Name)
     }
     #[instrument]
-    pub async fn from_name(name: &str, db: &DatabaseConnection, cluster: &Shasta) -> Option<Model> {
+    pub async fn from_name(
+        name: &str,
+        db: &DatabaseConnection,
+        cluster: &RegexCluster,
+    ) -> Option<Model> {
         if !cluster.real_node(name) {
             debug!("request node {} is not real", name);
             return None;
@@ -78,7 +82,7 @@ impl Entity {
         name: &str,
         state: TargetStatus,
         db: &DatabaseConnection,
-        cluster: &Shasta,
+        cluster: &RegexCluster,
     ) -> Option<Model> {
         if !cluster.real_node(name) {
             warn!("Tried making target for fake node {}", name);

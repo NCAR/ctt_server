@@ -28,6 +28,6 @@ pub trait ClusterTrait {
     ) -> Result<(), ()>;
 }
 
+mod regex_cluster;
 mod scheduler;
-mod shasta;
-pub use shasta::Shasta;
+pub use regex_cluster::RegexCluster;
