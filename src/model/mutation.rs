@@ -323,6 +323,9 @@ pub async fn issue_open(
     tx: &mpsc::Sender<String>,
     cluster: &RegexCluster,
 ) -> Result<issue::Model, String> {
+    if !cluster.real_node(&i.target) {
+        return Err(format!("{} is not a real node", &i.target));
+    }
     let target = if let Some(t) = Target::from_name(&i.target, db, cluster).await {
         t
     } else {

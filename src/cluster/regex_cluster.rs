@@ -24,9 +24,9 @@ impl RegexCluster {
         for ntype in self.node_types.clone() {
             //let re = Regex::new(&ntype.names).unwrap();
             let re = if let Some(digits) = ntype.digits {
-                Regex::new(&format!(r"{}\d{{{}}}", ntype.prefix, digits)).unwrap()
+                Regex::new(&format!(r"^{}\d{{{}}}$", ntype.prefix, digits)).unwrap()
             } else {
-                Regex::new(&format!(r"{}\d+", ntype.prefix)).unwrap()
+                Regex::new(&format!(r"^{}\d+$", ntype.prefix)).unwrap()
             };
             if re.is_match(target) {
                 let val = target.strip_prefix(&ntype.prefix).unwrap();
@@ -177,7 +177,7 @@ fn real_node() {
         slot: Some(4),
     }]);
     let expected_true = vec!["gu0001", "gu0002", "gu0015", "gu0016", "gu0017", "gu0018"];
-    let expected_false = vec!["gu1", "gu0000", "NotANode", "gu-001", "gu0019"];
+    let expected_false = vec!["gu1", "gu0000", "NotANode", "gu-001", "gu0019", "gu00017"];
     for n in &expected_true {
         let actual = gust.real_node(n);
         println!("for {} expected: true, actual: {}", n, actual);
