@@ -23,6 +23,13 @@ pub struct Conf {
     pub certs_dir: String,
     pub server_addr: String,
     pub node_types: Vec<NodeType>,
+    pub auth: Auth,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct Auth {
+    pub admin: Vec<String>,
+    pub guest: Vec<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

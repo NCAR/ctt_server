@@ -14,8 +14,7 @@ use axum::{
     error_handling::HandleErrorLayer,
     extract::Extension,
     response::{self, IntoResponse},
-    routing::get,
-    routing::post,
+    routing::{get, post},
     Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
@@ -151,7 +150,7 @@ async fn main() {
         stdout_log.with_filter(
             Targets::new()
                 .with_target("sqlx::query", Level::WARN)
-                .with_target("ctt_server", Level::DEBUG)
+                .with_target("cttd", Level::DEBUG)
                 .with_default(Level::INFO),
         ),
     );
@@ -183,17 +182,18 @@ async fn main() {
         .route("/api", post(graphql_handler))
         .route_layer(Extension(schema))
         .route("/api/schema", get(schema_handler))
-        .route_layer(ValidateRequestHeaderLayer::custom(auth::Auth))
+        .route_layer(ValidateRequestHeaderLayer::custom(conf.auth.clone()))
         //login route can't be protected by auth
         .route("/login", post(auth::login_handler))
         //add logging and timeout to all requests
+        .layer(Extension(conf.clone()))
         .layer(
             ServiceBuilder::new()
                 // `timeout` will produce an error if the handler takes
                 // too long so we must handle those
                 .layer(tower_http::trace::TraceLayer::new_for_http())
                 .layer(HandleErrorLayer::new(handle_timeout))
-                .timeout(Duration::from_secs(30)),
+                .timeout(Duration::from_secs(60)),
         );
 
     // run https server

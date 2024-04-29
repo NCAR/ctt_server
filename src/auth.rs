@@ -1,8 +1,10 @@
+use crate::conf::{Auth, Conf};
 use async_graphql::{Context, Guard, Result};
 use axum::body::Body;
 use axum::extract;
 #[cfg(feature = "auth")]
 use axum::http::header;
+use axum::Extension;
 use chrono::{NaiveDateTime, Utc};
 use http::StatusCode;
 #[allow(unused_imports)]
@@ -12,7 +14,7 @@ use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tower_http::validate_request::ValidateRequest;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 lazy_static! {
     static ref SECRET: String = {
@@ -24,9 +26,6 @@ lazy_static! {
     };
 }
 
-#[derive(Clone, Copy)]
-pub struct Auth;
-
 impl<B> ValidateRequest<B> for Auth {
     type ResponseBody = Body;
 
@@ -34,7 +33,7 @@ impl<B> ValidateRequest<B> for Auth {
         &mut self,
         request: &mut axum::http::Request<B>,
     ) -> axum::response::Result<(), axum::response::Response> {
-        if let Some(user) = check_auth(request) {
+        if let Some(user) = self.check_auth(request) {
             // Set `user_id` as a request extension so it can be accessed by other
             // services down the stack.
             info!("Request validated for user {}", &user.user);
@@ -54,36 +53,68 @@ impl<B> ValidateRequest<B> for Auth {
     }
 }
 
-#[cfg(not(feature = "auth"))]
-fn check_auth<B>(_request: &axum::http::Request<B>) -> Option<RoleGuard> {
-    info!("checking auth");
-    Some(RoleGuard::new(
-        Role::Admin,
-        "default".to_string(),
-        Utc::now().naive_utc() + chrono::Duration::minutes(6000),
-    ))
-}
-#[cfg(feature = "auth")]
-fn check_auth<B>(request: &axum::http::Request<B>) -> Option<RoleGuard> {
-    info!("checking auth");
-    request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|auth_header| auth_header.to_str().ok())
-        .and_then(|auth_value| {
-            auth_value
-                .strip_prefix("Bearer ")
-                .map(|stripped| stripped.to_owned())
-        })
-        .map(|t| {
-            decode::<RoleGuard>(
-                &t,
-                &DecodingKey::from_base64_secret(&SECRET).unwrap(),
-                &Validation::new(Algorithm::HS256),
-            )
-            .unwrap()
-        })
-        .map(|c| c.claims)
+impl Auth {
+    #[cfg(not(feature = "auth"))]
+    fn check_auth<B>(&self, _request: &axum::http::Request<B>) -> Option<RoleGuard> {
+        info!("checking auth");
+        Some(RoleGuard::new(
+            Role::Admin,
+            "default".to_string(),
+            Utc::now().naive_utc() + chrono::Duration::minutes(6000),
+        ))
+    }
+    #[cfg(feature = "auth")]
+    fn check_auth<B>(&self, request: &axum::http::Request<B>) -> Option<RoleGuard> {
+        info!("checking auth");
+        request
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|auth_header| auth_header.to_str().ok())
+            .and_then(|auth_value| {
+                auth_value
+                    .strip_prefix("Bearer ")
+                    .map(|stripped| stripped.to_owned())
+            })
+            .map(|t| {
+                decode::<RoleGuard>(
+                    &t,
+                    &DecodingKey::from_base64_secret(&SECRET).unwrap(),
+                    &Validation::new(Algorithm::HS256),
+                )
+                .unwrap()
+            })
+            .map(|c| c.claims)
+    }
+
+    async fn check_role(&self, usr: &str, uid: u32) -> Option<Role> {
+        let user = users::get_user_by_name(usr)?;
+        if user.uid() != uid {
+            debug!(
+                "UID does not match expected user: {:?} expected uid: {}",
+                usr, uid
+            );
+            return None;
+        }
+        let groups: HashSet<String> = user
+            .groups()?
+            .iter()
+            .map(|g| g.name().to_os_string().into_string())
+            .filter_map(|x| x.ok())
+            .collect();
+        for g in &self.admin {
+            if groups.contains(g) {
+                info!("admin!");
+                return Some(Role::Admin);
+            }
+        }
+        for g in &self.guest {
+            if groups.contains(g) {
+                info!("guest!");
+                return Some(Role::Guest);
+            }
+        }
+        None
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -97,51 +128,21 @@ pub struct Token {
     token: String,
 }
 
-async fn check_role(usr: &str, uid: u32) -> Option<Role> {
-    let user = users::get_user_by_name(usr)?;
-    if user.uid() != uid {
-        debug!(
-            "UID does not match expected user: {:?} expected uid: {}",
-            usr, uid
-        );
-        return None;
-    }
-    let groups: HashSet<String> = user
-        .groups()?
-        .iter()
-        .map(|g| g.name().to_os_string().into_string())
-        .filter_map(|x| x.ok())
-        .collect();
-    let admin = vec!["hsg", "ssg", "casg"];
-    let guest = vec!["ncar", "root"];
-    for g in admin {
-        if groups.contains(g) {
-            info!("admin!");
-            return Some(Role::Admin);
-        }
-    }
-    for g in guest {
-        if groups.contains(g) {
-            info!("guest!");
-            return Some(Role::Guest);
-        }
-    }
-    None
-}
-
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub enum AuthRequest {
     // munge encrypted Json<UserLogin>
     Munge(String),
 }
 
 pub async fn login_handler(
+    Extension(conf): Extension<Conf>,
     extract::Json(raw_payload): extract::Json<AuthRequest>,
 ) -> Result<axum::Json<Token>, (StatusCode, String)> {
     match raw_payload {
         AuthRequest::Munge(payload) => {
-            let payload = munge_auth::unmunge(payload);
-            if payload.is_err() {
+            let payload = munge_auth::unmunge(payload.to_string());
+            if let Err(e) = payload {
+                warn!("unable to unmunge payload: {}", e);
                 return Err((
                     StatusCode::BAD_REQUEST,
                     "Unable to deserialize request".to_string(),
@@ -159,7 +160,7 @@ pub async fn login_handler(
             }
             let payload: UserLogin = payload.unwrap();
             info!("Login request: {:?}", payload);
-            let role = check_role(&payload.user, uid).await;
+            let role = conf.auth.check_role(&payload.user, uid).await;
             if role.is_none() {
                 info!("bad user");
                 return Err((StatusCode::FORBIDDEN, "User not authorized".to_string()));
