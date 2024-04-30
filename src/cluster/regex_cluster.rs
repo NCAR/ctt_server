@@ -3,6 +3,7 @@ use super::scheduler;
 use crate::cluster::ClusterTrait;
 use crate::conf::NodeType;
 use crate::entities::target::TargetStatus;
+use crate::ChangeLogMsg;
 use regex::Regex;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -94,7 +95,7 @@ impl ClusterTrait for RegexCluster {
     async fn nodes_status(
         &self,
         pbs_srv: &pbs::Server,
-        tx: &mpsc::Sender<String>,
+        tx: &mpsc::Sender<ChangeLogMsg>,
     ) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
         scheduler::nodes_status(pbs_srv, tx).await
     }
@@ -103,7 +104,7 @@ impl ClusterTrait for RegexCluster {
         target: &str,
         operator: &str,
         pbs_srv: &pbs::Server,
-        tx: &mpsc::Sender<String>,
+        tx: &mpsc::Sender<ChangeLogMsg>,
     ) -> Result<(), ()> {
         scheduler::release_node(target, operator, pbs_srv, tx).await
     }
@@ -113,7 +114,7 @@ impl ClusterTrait for RegexCluster {
         comment: &str,
         operator: &str,
         pbs_srv: &pbs::Server,
-        tx: &mpsc::Sender<String>,
+        tx: &mpsc::Sender<ChangeLogMsg>,
     ) -> Result<(), ()> {
         scheduler::offline_node(target, comment, operator, pbs_srv, tx).await
     }

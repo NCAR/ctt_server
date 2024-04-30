@@ -6,6 +6,7 @@ use crate::entities::issue::IssueStatus;
 use crate::entities::issue::ToOffline;
 use crate::entities::target::TargetStatus;
 use crate::model::mutation;
+use crate::ChangeLogMsg;
 use sea_orm::prelude::Expr;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, QuerySelect};
 use std::collections::HashMap;
@@ -217,9 +218,11 @@ async fn handle_transition(
     new_state: &TargetStatus,
     pbs_srv: &pbs::Server,
     db: &DatabaseConnection,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<ChangeLogMsg>,
     cluster: &RegexCluster,
 ) {
+    use crate::ChangeLogAction;
+
     let (expected_state, comment) = desired_state(target, db, cluster).await;
 
     //dont use old_state to figure out how to handle nodes
@@ -271,9 +274,11 @@ async fn handle_transition(
             TargetStatus::Online => {
                 info!("closing open issues for {}", target);
                 let _ = tx
-                    .send(format!(
-                        "ctt: Closing issues for {}, node found online",
-                        target
+                    .send(ChangeLogMsg::new(
+                        "ctt".to_string(),
+                        ChangeLogAction::Close,
+                        target.to_string(),
+                        "Node found online".to_string(),
                     ))
                     .await;
                 close_open_issues(target, db, cluster).await;

@@ -1,4 +1,4 @@
-use crate::entities::target::TargetStatus;
+use crate::{entities::target::TargetStatus, ChangeLogMsg};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
@@ -9,14 +9,14 @@ pub trait ClusterTrait {
     async fn nodes_status(
         &self,
         pbs_srv: &pbs::Server,
-        tx: &mpsc::Sender<String>,
+        tx: &mpsc::Sender<ChangeLogMsg>,
     ) -> Result<HashMap<String, (TargetStatus, String)>, ()>;
     async fn release_node(
         &self,
         target: &str,
         operator: &str,
         pbs_srv: &pbs::Server,
-        tx: &mpsc::Sender<String>,
+        tx: &mpsc::Sender<ChangeLogMsg>,
     ) -> Result<(), ()>;
     async fn offline_node(
         &self,
@@ -24,7 +24,7 @@ pub trait ClusterTrait {
         comment: &str,
         operator: &str,
         pbs_srv: &pbs::Server,
-        tx: &mpsc::Sender<String>,
+        tx: &mpsc::Sender<ChangeLogMsg>,
     ) -> Result<(), ()>;
 }
 

@@ -1,4 +1,5 @@
 use crate::entities::target::TargetStatus;
+use crate::{ChangeLogAction, ChangeLogMsg};
 #[cfg(feature = "pbs")]
 use pbs::{Attrl, Op, Server};
 use std::collections::HashMap;
@@ -9,7 +10,7 @@ use tracing::{info, warn};
 #[instrument(skip(pbs_srv))]
 pub async fn nodes_status(
     pbs_srv: &Server,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<ChangeLogMsg>,
 ) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
     //TODO filter stat attribs (just need hostname, jobs, and state)
     //TODO need to handle err
@@ -72,7 +73,12 @@ pub async fn nodes_status(
                     warn!("Error offlining node {}: {}", name, e);
                 }
                 let _ = tx
-                    .send(format!("ctt offlining: {}, {}", name, comment))
+                    .send(ChangeLogMsg::new(
+                        "ctt".to_string(),
+                        ChangeLogAction::Offline,
+                        name.clone(),
+                        comment.to_string(),
+                    ))
                     .await;
                 if jobs {
                     TargetStatus::Draining
@@ -90,7 +96,7 @@ pub async fn release_node(
     target: &str,
     operator: &str,
     pbs_srv: &Server,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<ChangeLogMsg>,
 ) -> Result<(), ()> {
     info!("{} resuming node {}", operator, target);
     #[cfg(feature = "pbs")]
@@ -98,7 +104,12 @@ pub async fn release_node(
         return Err(());
     }
     let _ = tx
-        .send(format!("{} onlining node: {}", operator, target))
+        .send(ChangeLogMsg::new(
+            operator.to_string(),
+            ChangeLogAction::Resume,
+            target.to_string(),
+            "".to_string(),
+        ))
         .await;
     Ok(())
 }
@@ -108,7 +119,7 @@ pub async fn offline_node(
     comment: &str,
     operator: &str,
     pbs_srv: &Server,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<ChangeLogMsg>,
 ) -> Result<(), ()> {
     info!("{} offlining: {}, {}", operator, target, comment);
     #[cfg(feature = "pbs")]
@@ -116,7 +127,12 @@ pub async fn offline_node(
         return Err(());
     }
     let _ = tx
-        .send(format!("{} offlining: {}, {}", operator, target, comment))
+        .send(ChangeLogMsg::new(
+            operator.to_string(),
+            ChangeLogAction::Offline,
+            target.to_string(),
+            comment.to_string(),
+        ))
         .await;
     Ok(())
 }

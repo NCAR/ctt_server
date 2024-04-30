@@ -88,16 +88,52 @@ enum CttEvent {
     OfflineNode(String),
 }
 
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+enum ChangeLogAction {
+    Offline,
+    Resume,
+    Close,
+    Open,
+    //Update,
+}
+
+#[derive(Debug, Clone)]
+struct ChangeLogMsg {
+    operator: String,
+    action: ChangeLogAction,
+    target: String,
+    comment: String,
+}
+
+impl ChangeLogMsg {
+    fn new(operator: String, action: ChangeLogAction, target: String, comment: String) -> Self {
+        ChangeLogMsg {
+            operator,
+            action,
+            target,
+            comment,
+        }
+    }
+}
+
 #[cfg(feature = "slack")]
 #[instrument(skip(conf))]
-async fn slack_updater(mut rx: mpsc::Receiver<String>, conf: Conf) {
+async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
+    use std::collections::HashMap;
+
     let connector = SlackClientHyperConnector::new().unwrap();
     let client = SlackClient::new(connector);
     let token_value: SlackApiTokenValue = conf.slack.token.into();
     let token: SlackApiToken = SlackApiToken::new(token_value);
-    let mut updates = vec![];
+    // operator, action, comment: target
+    let mut updates: HashMap<(String, ChangeLogAction, String), Vec<String>> = HashMap::new();
     while let Some(u) = rx.recv().await {
-        updates.push(u);
+        let key = (u.operator, u.action, u.comment);
+        if let Some(v) = updates.get_mut(&key) {
+            v.push(u.target);
+        } else {
+            updates.insert(key, vec![u.target]);
+        }
     }
     if updates.is_empty() {
         return;
