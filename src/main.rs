@@ -128,6 +128,12 @@ async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
     // operator, action, comment: target
     let mut updates: HashMap<(String, ChangeLogAction, String), Vec<String>> = HashMap::new();
     while let Some(u) = rx.recv().await {
+        if u.operator == "ctt"
+            && (u.action == ChangeLogAction::Open || u.action == ChangeLogAction::Close)
+        {
+            info!("Dropping changelog message: {:?}", u);
+            continue;
+        }
         let key = (u.operator, u.action, u.comment);
         if let Some(v) = updates.get_mut(&key) {
             v.push(u.target);
