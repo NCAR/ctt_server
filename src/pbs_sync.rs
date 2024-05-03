@@ -144,7 +144,7 @@ pub async fn desired_state(
                     .unwrap()
                     .is_some()
                 {
-                    debug!("Offline due to card  wide ticket");
+                    debug!("Offline due to card wide ticket");
                     return (TargetStatus::Offline, format!("{} sibling", &target));
                 }
             }

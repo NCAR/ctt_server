@@ -146,6 +146,9 @@ async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                 comment: c,
                 operator: o,
             } => {
+                if o == "ctt" {
+                    continue;
+                }
                 comment = Some(c);
                 if let Some(key) = close_issues.get_mut(&t) {
                     key.insert(i);
@@ -161,6 +164,9 @@ async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                 title: t,
                 operator: o,
             } => {
+                if o == "ctt" {
+                    continue;
+                }
                 comment = Some(t);
                 open_issues.insert(i);
                 operators.insert(o);
@@ -182,7 +188,9 @@ async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
         }
     }
 
-    if operators.is_empty() && offline_nodes.is_empty() {
+    // don't care if its ctt doing anything besides offlining nodes (no operators and no
+    // offline_nodes or if no nodes state is being changed (no resume_nodes or offline_nodes)
+    if (operators.is_empty() || resume_nodes.is_empty()) && offline_nodes.is_empty() {
         return;
     }
 
