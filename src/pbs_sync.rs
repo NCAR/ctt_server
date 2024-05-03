@@ -221,8 +221,6 @@ async fn handle_transition(
     tx: &mpsc::Sender<ChangeLogMsg>,
     cluster: &RegexCluster,
 ) {
-    use crate::ChangeLogAction;
-
     let (expected_state, comment) = desired_state(target, db, cluster).await;
 
     //dont use old_state to figure out how to handle nodes
@@ -273,14 +271,6 @@ async fn handle_transition(
             TargetStatus::Offline => TargetStatus::Offline,
             TargetStatus::Online => {
                 info!("closing open issues for {}", target);
-                let _ = tx
-                    .send(ChangeLogMsg::new(
-                        "ctt".to_string(),
-                        ChangeLogAction::Close,
-                        target.to_string(),
-                        "Node found online".to_string(),
-                    ))
-                    .await;
                 close_open_issues(target, db, cluster).await;
                 TargetStatus::Online
             }

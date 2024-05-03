@@ -5,7 +5,7 @@ use crate::entities::issue::{self, IssueStatus};
 use crate::entities::prelude::*;
 use crate::entities::target::{self, TargetStatus};
 use crate::pbs_sync::PBS_LOCK;
-use crate::{entities, ChangeLogAction, ChangeLogMsg};
+use crate::{entities, ChangeLogMsg};
 use async_graphql::{Context, InputObject, Object, Result};
 use chrono::Utc;
 #[cfg(feature = "pbs")]
@@ -157,12 +157,9 @@ async fn issue_update(
                     )),
                 )?;
                 let _ = tx
-                    .send(ChangeLogMsg::new(
-                        operator.to_string(),
-                        ChangeLogAction::Offline,
-                        t.to_string(),
-                        issue.title.clone(),
-                    ))
+                    .send(ChangeLogMsg::Offline {
+                        target: t.to_string(),
+                    })
                     .await;
                 let mut sib: target::ActiveModel =
                     Target::from_name(&t, db, cluster).await.unwrap().into();
@@ -173,12 +170,9 @@ async fn issue_update(
             if i.to_offline.is_some() {
                 let _ = srv.offline_vnode(&target.name, Some(&issue.title));
                 let _ = tx
-                    .send(ChangeLogMsg::new(
-                        operator.to_string(),
-                        ChangeLogAction::Offline,
-                        target.name.to_string(),
-                        issue.title.clone(),
-                    ))
+                    .send(ChangeLogMsg::Offline {
+                        target: target.name.to_string(),
+                    })
                     .await;
                 let mut t: target::ActiveModel = target.into();
                 t.status = ActiveValue::Set(TargetStatus::Draining);
@@ -187,6 +181,13 @@ async fn issue_update(
         }
     }
     info!("Updating issue {}: {:?}", issue.id, updated_issue);
+    let _ = tx
+        .send(ChangeLogMsg::Update {
+            issue: issue.id,
+            operator: operator.to_string(),
+            title: issue.title.clone(),
+        })
+        .await;
     updated_issue.updated_at = ActiveValue::Set(Utc::now().naive_utc());
     updated_issue.update(db).await.unwrap();
     check_blade(
@@ -367,14 +368,7 @@ pub async fn issue_open(
         let status = srv.stat_host(&None, None)?;
         for t in to_offline(&i.target, status, i.to_offline, cluster).into_iter() {
             srv.offline_vnode(&t, Some(&format!("{} sibling", &i.target)))?;
-            let _ = tx
-                .send(ChangeLogMsg::new(
-                    operator.to_string(),
-                    ChangeLogAction::Offline,
-                    t.clone(),
-                    i.title.clone(),
-                ))
-                .await;
+            let _ = tx.send(ChangeLogMsg::Offline { target: t.clone() }).await;
             let mut sib: target::ActiveModel =
                 Target::from_name(&t, db, cluster).await.unwrap().into();
             sib.status = ActiveValue::Set(TargetStatus::Draining);
@@ -383,12 +377,9 @@ pub async fn issue_open(
         if i.to_offline.is_some() {
             let _ = srv.offline_vnode(&i.target, Some(&i.title));
             let _ = tx
-                .send(ChangeLogMsg::new(
-                    operator.to_string(),
-                    ChangeLogAction::Offline,
-                    i.target.clone(),
-                    i.title.clone(),
-                ))
+                .send(ChangeLogMsg::Offline {
+                    target: i.target.clone(),
+                })
                 .await;
             let mut target: target::ActiveModel = target.into();
             target.status = ActiveValue::Set(TargetStatus::Draining);
@@ -408,12 +399,11 @@ pub async fn issue_open(
     };
     let new_issue = new_issue.insert(db).await.unwrap();
     let _ = tx
-        .send(ChangeLogMsg::new(
-            operator.to_string(),
-            ChangeLogAction::Open,
-            i.target.clone(),
-            i.title.clone(),
-        ))
+        .send(ChangeLogMsg::Open {
+            title: i.title.clone(),
+            issue: new_issue.id,
+            operator: operator.to_string(),
+        })
         .await;
     let c = comment::ActiveModel {
         created_by: ActiveValue::Set(operator.to_string()),
@@ -441,6 +431,7 @@ async fn issue_close(
             "Closing ticket {} for {}: {}",
             cttissue, target.name, comment
         );
+        let title = issue.title.clone();
         let mut issue: issue::ActiveModel = issue.into();
         issue.status = ActiveValue::Set(IssueStatus::Closed);
         issue.update(db).await.unwrap();
@@ -453,12 +444,12 @@ async fn issue_close(
         c.insert(db).await.unwrap();
         let tx = &ctx.data_opt::<mpsc::Sender<ChangeLogMsg>>().unwrap();
         let _ = tx
-            .send(ChangeLogMsg::new(
-                operator.clone(),
-                crate::ChangeLogAction::Close,
-                target.name.clone(),
+            .send(ChangeLogMsg::Close {
+                issue: cttissue,
+                operator: operator.clone(),
                 comment,
-            ))
+                title,
+            })
             .await;
         check_blade(&target.name, db, tx, cluster, &operator).await;
     }

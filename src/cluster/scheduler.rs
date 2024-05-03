@@ -1,5 +1,5 @@
 use crate::entities::target::TargetStatus;
-use crate::{ChangeLogAction, ChangeLogMsg};
+use crate::ChangeLogMsg;
 #[cfg(feature = "pbs")]
 use pbs::{Attrl, Op, Server};
 use std::collections::HashMap;
@@ -73,12 +73,9 @@ pub async fn nodes_status(
                     warn!("Error offlining node {}: {}", name, e);
                 }
                 let _ = tx
-                    .send(ChangeLogMsg::new(
-                        "ctt".to_string(),
-                        ChangeLogAction::Offline,
-                        name.clone(),
-                        comment.to_string(),
-                    ))
+                    .send(ChangeLogMsg::Offline {
+                        target: name.clone(),
+                    })
                     .await;
                 if jobs {
                     TargetStatus::Draining
@@ -104,12 +101,9 @@ pub async fn release_node(
         return Err(());
     }
     let _ = tx
-        .send(ChangeLogMsg::new(
-            operator.to_string(),
-            ChangeLogAction::Resume,
-            target.to_string(),
-            "".to_string(),
-        ))
+        .send(ChangeLogMsg::Resume {
+            target: target.to_string(),
+        })
         .await;
     Ok(())
 }
@@ -127,12 +121,9 @@ pub async fn offline_node(
         return Err(());
     }
     let _ = tx
-        .send(ChangeLogMsg::new(
-            operator.to_string(),
-            ChangeLogAction::Offline,
-            target.to_string(),
-            comment.to_string(),
-        ))
+        .send(ChangeLogMsg::Offline {
+            target: target.to_string(),
+        })
         .await;
     Ok(())
 }
