@@ -1,6 +1,5 @@
 use crate::entities::target::TargetStatus;
 use crate::ChangeLogMsg;
-#[cfg(feature = "pbs")]
 use pbs::{Attrl, Op, Server};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -17,7 +16,6 @@ pub async fn nodes_status(
     //TODO consider calling pbs_srv.stat_vnode from a spawn_blocking task
     //TODO add a timeout
     let mut resp = HashMap::new();
-    #[cfg(feature = "pbs")]
     let vnode_stat = pbs_srv.stat_vnode(&None, None);
     if vnode_stat.is_err() {
         return Err(());
@@ -96,7 +94,6 @@ pub async fn release_node(
     tx: &mpsc::Sender<ChangeLogMsg>,
 ) -> Result<(), ()> {
     info!("{} resuming node {}", operator, target);
-    #[cfg(feature = "pbs")]
     if pbs_srv.clear_vnode(target, Some("")).is_err() {
         return Err(());
     }
@@ -116,7 +113,6 @@ pub async fn offline_node(
     tx: &mpsc::Sender<ChangeLogMsg>,
 ) -> Result<(), ()> {
     info!("{} offlining: {}, {}", operator, target, comment);
-    #[cfg(feature = "pbs")]
     if pbs_srv.offline_vnode(target, Some(comment)).is_err() {
         return Err(());
     }

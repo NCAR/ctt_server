@@ -1,13 +1,8 @@
 use config::{Config, ConfigError, File};
 use serde::{Deserialize, Serialize};
 
-#[allow(dead_code)]
-const DEFAULT_CONF_FILE: &str = "/opt/ncar/etc/ctt.yml";
-
 pub fn get_config(path: Option<String>) -> Result<Conf, ConfigError> {
     let mut conf = Config::builder();
-    //TODO read from default source only if it exists, warn otherwise
-    //.add_source(File::with_name(DEFAULT_CONF_FILE));
     if let Some(p) = path {
         conf = conf.add_source(File::with_name(&p));
     }

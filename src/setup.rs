@@ -8,37 +8,6 @@ pub async fn setup_and_connect(db_url: &str) -> Result<DatabaseConnection, DbErr
     let db = Database::connect(format!("sqlite://{}", db_url))
         .await
         .unwrap();
-    let db = match db.get_database_backend() {
-        /*
-        DbBackend::MySql => {
-            db.execute(Statement::from_string(
-                db.get_database_backend(),
-                format!("CREATE DATABASE IF NOT EXISTS `{}`;", DB_NAME),
-            ))
-            .await?;
-
-            let url = format!("{}/{}", DATABASE_URL, DB_NAME);
-            Database::connect(&url).await?
-        }
-        DbBackend::Postgres => {
-            db.execute(Statement::from_string(
-                db.get_database_backend(),
-                format!("DROP DATABASE IF EXISTS \"{}\";", DB_NAME),
-            ))
-            .await?;
-            db.execute(Statement::from_string(
-                db.get_database_backend(),
-                format!("CREATE DATABASE \"{}\";", DB_NAME),
-            ))
-            .await?;
-
-            let url = format!("{}/{}", DATABASE_URL, DB_NAME);
-            Database::connect(&url).await?
-        }
-        */
-        DbBackend::Sqlite => db,
-        _ => panic!("only sqlite implemented"),
-    };
 
     let schema_manager = SchemaManager::new(&db);
 

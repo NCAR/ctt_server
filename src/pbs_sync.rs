@@ -29,7 +29,6 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
     let cluster = RegexCluster::new(conf.node_types.clone());
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
-    #[cfg(feature = "pbs")]
     loop {
         interval.tick().await;
         let sched_lock = PBS_LOCK.lock().await;
@@ -210,7 +209,6 @@ pub async fn close_open_issues(target: &str, db: &DatabaseConnection, cluster: &
 }
 
 #[instrument(skip(pbs_srv, db, tx))]
-#[cfg(feature = "pbs")]
 #[allow(clippy::too_many_arguments)]
 async fn handle_transition(
     target: &str,

@@ -8,7 +8,6 @@ use crate::pbs_sync::PBS_LOCK;
 use crate::{entities, ChangeLogMsg};
 use async_graphql::{Context, InputObject, Object, Result};
 use chrono::Utc;
-#[cfg(feature = "pbs")]
 use pbs::Server;
 use sea_orm::entity::ActiveValue;
 use sea_orm::EntityTrait;
@@ -143,7 +142,6 @@ async fn issue_update(
             ..Default::default()
         };
         c.insert(db).await.unwrap();
-        #[cfg(feature = "pbs")]
         {
             let srv = Server::new();
             let status = srv.stat_host(&None, None)?;
@@ -210,7 +208,6 @@ async fn check_blade(
     operator: &str,
 ) {
     debug!("Checking blade status for {}", target);
-    #[cfg(feature = "pbs")]
     {
         let srv = Server::new();
         let nodes = cluster.cousins(target);
@@ -312,7 +309,6 @@ fn node_group(
 }
 
 #[instrument(skip(status))]
-#[cfg(feature = "pbs")]
 fn to_offline(
     target: &str,
     status: pbs::StatResp,
@@ -362,7 +358,6 @@ pub async fn issue_open(
         return Ok(i);
     }
     let target_id = target.id;
-    #[cfg(feature = "pbs")]
     {
         let srv = Server::new();
         let status = srv.stat_host(&None, None)?;
