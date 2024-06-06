@@ -2,7 +2,6 @@ use crate::conf::{Auth, Conf};
 use async_graphql::{Context, Guard, Result};
 use axum::body::Body;
 use axum::extract;
-#[cfg(feature = "auth")]
 use axum::http::header;
 use axum::Extension;
 use chrono::{NaiveDateTime, Utc};
@@ -54,16 +53,6 @@ impl<B> ValidateRequest<B> for Auth {
 }
 
 impl Auth {
-    #[cfg(not(feature = "auth"))]
-    fn check_auth<B>(&self, _request: &axum::http::Request<B>) -> Option<RoleGuard> {
-        info!("checking auth");
-        Some(RoleGuard::new(
-            Role::Admin,
-            "default".to_string(),
-            Utc::now().naive_utc() + chrono::Duration::minutes(6000),
-        ))
-    }
-    #[cfg(feature = "auth")]
     fn check_auth<B>(&self, request: &axum::http::Request<B>) -> Option<RoleGuard> {
         info!("checking auth");
         request
@@ -116,29 +105,12 @@ impl Auth {
         None
     }
 }
-
-#[derive(Deserialize, Debug)]
-pub struct UserLogin {
-    user: String,
-    timestamp: NaiveDateTime,
-}
-
-#[derive(Serialize)]
-pub struct Token {
-    token: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub enum AuthRequest {
-    // munge encrypted Json<UserLogin>
-    Munge(String),
-}
-
 pub async fn login_handler(
     Extension(conf): Extension<Conf>,
     extract::Json(raw_payload): extract::Json<AuthRequest>,
 ) -> Result<axum::Json<Token>, (StatusCode, String)> {
     match raw_payload {
+        // currently munge is the only supported auth method
         AuthRequest::Munge(payload) => {
             let payload = munge_auth::unmunge(payload.to_string());
             if let Err(e) = payload {
@@ -166,23 +138,33 @@ pub async fn login_handler(
                 return Err((StatusCode::FORBIDDEN, "User not authorized".to_string()));
             }
             let role = role.unwrap();
-            if payload.timestamp > Utc::now().naive_utc()
-                || payload.timestamp < Utc::now().naive_utc() - chrono::Duration::minutes(2)
-            {
-                info!("bad timestamp");
-                Err((StatusCode::BAD_REQUEST, "bad timestamp".to_string()))
-            } else {
-                let key = EncodingKey::from_base64_secret(&SECRET).unwrap();
-                let claims = RoleGuard::new(
-                    role,
-                    payload.user,
-                    Utc::now().naive_utc() + chrono::Duration::minutes(6000),
-                );
-                let token = encode(&Header::default(), &claims, &key).unwrap();
-                Ok(axum::Json(Token { token }))
-            }
+            let key = EncodingKey::from_base64_secret(&SECRET).unwrap();
+            let claims = RoleGuard::new(
+                role,
+                // using payload.user is fine since its been authenticated via munge
+                payload.user,
+                Utc::now().naive_utc() + chrono::Duration::minutes(60),
+            );
+            let token = encode(&Header::default(), &claims, &key).unwrap();
+            Ok(axum::Json(Token { token }))
         }
     }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct UserLogin {
+    user: String,
+}
+
+#[derive(Serialize)]
+pub struct Token {
+    token: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub enum AuthRequest {
+    // munge encrypted Json<UserLogin>
+    Munge(String),
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Serialize, Deserialize, Debug)]
@@ -211,6 +193,7 @@ impl RoleGuard {
 pub struct RoleChecker {
     role: Role,
 }
+
 impl RoleChecker {
     pub fn new(role: Role) -> Self {
         Self { role }
