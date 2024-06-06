@@ -8,6 +8,7 @@ use crate::entities::issue::ToOffline;
 use crate::entities::target::TargetStatus;
 use crate::model::mutation;
 use crate::ChangeLogMsg;
+use pbs::Server;
 use sea_orm::prelude::Expr;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, QuerySelect};
 use std::collections::HashMap;
@@ -30,25 +31,26 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
-        interval.tick().await;
+        // don't want multiple ctt threads messing with scheduler concurrently
         let sched_lock = PBS_LOCK.lock().await;
         let db = db.as_ref();
         info!("performing sync with pbs");
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(changelog::slack_updater(rx, conf.clone()));
-        let pbs_srv = pbs::Server::new();
+        let pbs_srv = Server::new();
         let pbs_node_state = cluster.nodes_status(&pbs_srv, &tx).await;
-        let mut ctt_node_state = get_ctt_nodes(db).await;
         if pbs_node_state.is_err() {
             warn!("could not get node state from cluster");
             continue;
         }
         let pbs_node_state = pbs_node_state.unwrap();
+        let mut ctt_node_state = get_ctt_nodes(db).await;
 
-        //handle any pbs nodes not in ctt
+        //add any pbs nodes not in ctt into ctt for tracking
         pbs_node_state
             .keys()
             .filter(|t| !ctt_node_state.contains_key(*t))
+            .filter(|t| cluster.real_node(t))
             .collect::<Vec<&String>>()
             .iter()
             .for_each(|t| {
@@ -87,6 +89,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         }
         info!("pbs sync complete");
         drop(sched_lock);
+        interval.tick().await;
     }
 }
 
@@ -215,7 +218,7 @@ async fn handle_transition(
     new_comment: &str,
     old_state: &TargetStatus,
     new_state: &TargetStatus,
-    pbs_srv: &pbs::Server,
+    pbs_srv: &Server,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<ChangeLogMsg>,
     cluster: &RegexCluster,
@@ -231,6 +234,9 @@ async fn handle_transition(
             if *new_state == TargetStatus::Online {
                 TargetStatus::Online
             } else {
+                // expected node to be online, but it wasn't so open an issue
+                // we know no issues are currently open since expected state
+                // would not be online if there were
                 if let Some(new_issue) = crate::model::NewIssue::new(
                     None,
                     new_comment.to_string(),
@@ -270,6 +276,8 @@ async fn handle_transition(
             TargetStatus::Offline => TargetStatus::Offline,
             TargetStatus::Online => {
                 info!("closing open issues for {}", target);
+                // know it is safe to simply close all issue open against the node because
+                // expected status would be Offline if there were any issues with ToOffline set
                 close_open_issues(target, db, cluster).await;
                 TargetStatus::Online
             }
