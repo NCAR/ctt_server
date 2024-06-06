@@ -3,11 +3,9 @@ use super::scheduler;
 use crate::cluster::ClusterTrait;
 use crate::conf::NodeType;
 use crate::entities::target::TargetStatus;
-use crate::ChangeLogMsg;
 use regex::Regex;
 use std::collections::HashMap;
 use std::str::FromStr;
-use tokio::sync::mpsc;
 use tracing::instrument;
 use tracing::warn;
 
@@ -95,18 +93,16 @@ impl ClusterTrait for RegexCluster {
     async fn nodes_status(
         &self,
         pbs_srv: &pbs::Server,
-        tx: &mpsc::Sender<ChangeLogMsg>,
     ) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
-        scheduler::nodes_status(pbs_srv, tx).await
+        scheduler::nodes_status(pbs_srv).await
     }
     async fn release_node(
         &self,
         target: &str,
         operator: &str,
         pbs_srv: &pbs::Server,
-        tx: &mpsc::Sender<ChangeLogMsg>,
     ) -> Result<(), ()> {
-        scheduler::release_node(target, operator, pbs_srv, tx).await
+        scheduler::release_node(target, operator, pbs_srv).await
     }
     async fn offline_node(
         &self,
@@ -114,9 +110,8 @@ impl ClusterTrait for RegexCluster {
         comment: &str,
         operator: &str,
         pbs_srv: &pbs::Server,
-        tx: &mpsc::Sender<ChangeLogMsg>,
     ) -> Result<(), ()> {
-        scheduler::offline_node(target, comment, operator, pbs_srv, tx).await
+        scheduler::offline_node(target, comment, operator, pbs_srv).await
     }
 }
 

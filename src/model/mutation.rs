@@ -212,7 +212,7 @@ async fn check_blade(
         let srv = Server::new();
         let nodes = cluster.cousins(target);
         // current status of nodes in blade
-        let current_status = cluster.nodes_status(&srv, tx).await;
+        let current_status = cluster.nodes_status(&srv).await;
         if current_status.is_err() {
             warn!("issue getting nodes status");
             return;
@@ -235,13 +235,15 @@ async fn check_blade(
                 TargetStatus::Draining => panic!("Expected state is never Draining"),
                 TargetStatus::Online => {
                     if new_state != TargetStatus::Online
-                        && cluster
-                            .release_node(&target, operator, &srv, tx)
-                            .await
-                            .is_err()
+                        && cluster.release_node(&target, operator, &srv).await.is_err()
                     {
                         warn!("could not release node {}", &target);
                     }
+                    let _ = tx
+                        .send(ChangeLogMsg::Resume {
+                            target: target.to_string(),
+                        })
+                        .await;
                     TargetStatus::Online
                 }
                 TargetStatus::Offline => match new_state {
@@ -249,12 +251,17 @@ async fn check_blade(
                     TargetStatus::Offline => TargetStatus::Offline,
                     state => {
                         if cluster
-                            .offline_node(&target, &comment, operator, &srv, tx)
+                            .offline_node(&target, &comment, operator, &srv)
                             .await
                             .is_err()
                         {
                             warn!("could not release node {}", &target);
                         }
+                        let _ = tx
+                            .send(ChangeLogMsg::Offline {
+                                target: target.to_string(),
+                            })
+                            .await;
                         if state == TargetStatus::Down {
                             TargetStatus::Offline
                         } else {

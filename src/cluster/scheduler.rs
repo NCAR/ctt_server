@@ -1,18 +1,12 @@
 use crate::entities::target::TargetStatus;
-use crate::ChangeLogMsg;
 use pbs::{Attrl, Op, Server};
 use std::collections::HashMap;
-use tokio::sync::mpsc;
 use tracing::instrument;
 use tracing::{info, warn};
 
 #[instrument(skip(pbs_srv))]
-pub async fn nodes_status(
-    pbs_srv: &Server,
-    tx: &mpsc::Sender<ChangeLogMsg>,
-) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
+pub async fn nodes_status(pbs_srv: &Server) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
     //TODO filter stat attribs (just need hostname, jobs, and state)
-    //TODO need to handle err
     //TODO consider calling pbs_srv.stat_vnode from a spawn_blocking task
     //TODO add a timeout
     let mut resp = HashMap::new();
@@ -36,6 +30,7 @@ pub async fn nodes_status(
             } else {
                 ""
             };
+        // vnodes always have a state attrib so the unwrap is safe
         let state = match n.attribs().get("state").unwrap() {
             Attrl::Value(Op::Default(j)) => j,
             x => {
@@ -65,16 +60,10 @@ pub async fn nodes_status(
             "free" => TargetStatus::Online,
             x => {
                 warn!("unrecognized node state, '{}'", x);
-                //TODO FIXME handle err
                 //TODO should we really offline nodes randomly while checking node status?
                 if let Err(e) = pbs_srv.offline_vnode(&name, None) {
                     warn!("Error offlining node {}: {}", name, e);
                 }
-                let _ = tx
-                    .send(ChangeLogMsg::Offline {
-                        target: name.clone(),
-                    })
-                    .await;
                 if jobs {
                     TargetStatus::Draining
                 } else {
@@ -87,21 +76,11 @@ pub async fn nodes_status(
     Ok(resp)
 }
 
-pub async fn release_node(
-    target: &str,
-    operator: &str,
-    pbs_srv: &Server,
-    tx: &mpsc::Sender<ChangeLogMsg>,
-) -> Result<(), ()> {
+pub async fn release_node(target: &str, operator: &str, pbs_srv: &Server) -> Result<(), ()> {
     info!("{} resuming node {}", operator, target);
     if pbs_srv.clear_vnode(target, Some("")).is_err() {
         return Err(());
     }
-    let _ = tx
-        .send(ChangeLogMsg::Resume {
-            target: target.to_string(),
-        })
-        .await;
     Ok(())
 }
 
@@ -110,16 +89,10 @@ pub async fn offline_node(
     comment: &str,
     operator: &str,
     pbs_srv: &Server,
-    tx: &mpsc::Sender<ChangeLogMsg>,
 ) -> Result<(), ()> {
     info!("{} offlining: {}, {}", operator, target, comment);
     if pbs_srv.offline_vnode(target, Some(comment)).is_err() {
         return Err(());
     }
-    let _ = tx
-        .send(ChangeLogMsg::Offline {
-            target: target.to_string(),
-        })
-        .await;
     Ok(())
 }

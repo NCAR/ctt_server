@@ -38,7 +38,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(changelog::slack_updater(rx, conf.clone()));
         let pbs_srv = Server::new();
-        let pbs_node_state = cluster.nodes_status(&pbs_srv, &tx).await;
+        let pbs_node_state = cluster.nodes_status(&pbs_srv).await;
         if pbs_node_state.is_err() {
             warn!("could not get node state from cluster");
             continue;
@@ -259,9 +259,14 @@ async fn handle_transition(
             state => {
                 info!("{} found in state {:?}, expected offline", target, state);
                 cluster
-                    .offline_node(target, &comment, "ctt", pbs_srv, tx)
+                    .offline_node(target, &comment, "ctt", pbs_srv)
                     .await
                     .unwrap();
+                let _ = tx
+                    .send(ChangeLogMsg::Offline {
+                        target: target.to_string(),
+                    })
+                    .await;
                 if *state == TargetStatus::Down {
                     TargetStatus::Offline
                 } else {
