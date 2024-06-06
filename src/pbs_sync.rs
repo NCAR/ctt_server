@@ -1,3 +1,4 @@
+use crate::changelog;
 use crate::cluster::ClusterTrait;
 use crate::cluster::RegexCluster;
 use crate::conf::Conf;
@@ -35,7 +36,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         let db = db.as_ref();
         info!("performing sync with pbs");
         let (tx, rx) = mpsc::channel(5);
-        tokio::spawn(crate::slack_updater(rx, conf.clone()));
+        tokio::spawn(changelog::slack_updater(rx, conf.clone()));
         let pbs_srv = pbs::Server::new();
         let pbs_node_state = cluster.nodes_status(&pbs_srv, &tx).await;
         let mut ctt_node_state = get_ctt_nodes(db).await;
