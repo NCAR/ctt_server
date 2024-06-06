@@ -9,17 +9,11 @@ pub trait ClusterTrait {
         &self,
         pbs_srv: &pbs::Server,
     ) -> Result<HashMap<String, (TargetStatus, String)>, ()>;
-    async fn release_node(
-        &self,
-        target: &str,
-        operator: &str,
-        pbs_srv: &pbs::Server,
-    ) -> Result<(), ()>;
+    async fn release_node(&self, target: &str, pbs_srv: &pbs::Server) -> Result<(), ()>;
     async fn offline_node(
         &self,
         target: &str,
         comment: &str,
-        operator: &str,
         pbs_srv: &pbs::Server,
     ) -> Result<(), ()>;
 }

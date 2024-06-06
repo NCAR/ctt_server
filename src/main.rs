@@ -5,8 +5,8 @@ mod cluster;
 mod conf;
 mod entities;
 mod migrator;
-mod pbs_sync;
 mod setup;
+mod sync;
 use crate::conf::Conf;
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
@@ -90,7 +90,7 @@ async fn main() {
 
     let handle = Handle::new();
     tokio::spawn(graceful_shutdown(handle.clone()));
-    tokio::spawn(pbs_sync::pbs_sync(db.clone(), conf.clone()));
+    tokio::spawn(sync::pbs_sync(db.clone(), conf.clone()));
 
     let app = Router::new()
         .route("/", get(graphiql))

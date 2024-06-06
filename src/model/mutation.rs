@@ -4,7 +4,7 @@ use crate::entities::comment;
 use crate::entities::issue::{self, IssueStatus};
 use crate::entities::prelude::*;
 use crate::entities::target::{self, TargetStatus};
-use crate::pbs_sync::PBS_LOCK;
+use crate::sync::PBS_LOCK;
 use crate::{entities, ChangeLogMsg};
 use async_graphql::{Context, InputObject, Object, Result};
 use chrono::Utc;
@@ -224,9 +224,8 @@ async fn check_blade(
             .collect();
 
         for (target, (new_state, _new_comment)) in current_status {
-            let (expected_state, comment) =
-                crate::pbs_sync::desired_state(&target, db, cluster).await;
-            //almost the same as crate::pbs_sync::handle_transition, but different logic
+            let (expected_state, comment) = crate::sync::desired_state(&target, db, cluster).await;
+            //almost the same as crate::sync::handle_transition, but different logic
             //e.g. release a node if expected online but found offline
             //TODO combine with handle_transition since everything except expected online found not
             //online is the same
@@ -235,7 +234,7 @@ async fn check_blade(
                 TargetStatus::Draining => panic!("Expected state is never Draining"),
                 TargetStatus::Online => {
                     if new_state != TargetStatus::Online
-                        && cluster.release_node(&target, operator, &srv).await.is_err()
+                        && cluster.release_node(&target, &srv).await.is_err()
                     {
                         warn!("could not release node {}", &target);
                     }
@@ -250,11 +249,7 @@ async fn check_blade(
                     TargetStatus::Draining => TargetStatus::Draining,
                     TargetStatus::Offline => TargetStatus::Offline,
                     state => {
-                        if cluster
-                            .offline_node(&target, &comment, operator, &srv)
-                            .await
-                            .is_err()
-                        {
+                        if cluster.offline_node(&target, &comment, &srv).await.is_err() {
                             warn!("could not release node {}", &target);
                         }
                         let _ = tx
@@ -276,7 +271,7 @@ async fn check_blade(
                     TargetStatus::Offline => TargetStatus::Offline,
                     TargetStatus::Online => {
                         info!("Closing issues for {}", &target);
-                        crate::pbs_sync::close_open_issues(&target, db, cluster).await;
+                        crate::sync::close_open_issues(&target, db, cluster).await;
                         TargetStatus::Online
                     }
                 },
@@ -285,7 +280,7 @@ async fn check_blade(
                 "target: {}, current: {:?}, expected: {:?}, final: {:?}",
                 &target, &new_state, &expected_state, &final_state
             );
-            let old_state = crate::pbs_sync::get_ctt_nodes(db).await;
+            let old_state = crate::sync::get_ctt_nodes(db).await;
             //dont update state if it hasn't changed
             if *old_state.get(&target).unwrap() != final_state {
                 let node = entities::target::Entity::from_name(&target, db, cluster)

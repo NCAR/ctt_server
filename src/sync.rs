@@ -259,7 +259,7 @@ async fn handle_transition(
             state => {
                 info!("{} found in state {:?}, expected offline", target, state);
                 cluster
-                    .offline_node(target, &comment, "ctt", pbs_srv)
+                    .offline_node(target, &comment, pbs_srv)
                     .await
                     .unwrap();
                 let _ = tx

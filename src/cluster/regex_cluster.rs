@@ -96,22 +96,16 @@ impl ClusterTrait for RegexCluster {
     ) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
         scheduler::nodes_status(pbs_srv).await
     }
-    async fn release_node(
-        &self,
-        target: &str,
-        operator: &str,
-        pbs_srv: &pbs::Server,
-    ) -> Result<(), ()> {
-        scheduler::release_node(target, operator, pbs_srv).await
+    async fn release_node(&self, target: &str, pbs_srv: &pbs::Server) -> Result<(), ()> {
+        scheduler::release_node(target, pbs_srv).await
     }
     async fn offline_node(
         &self,
         target: &str,
         comment: &str,
-        operator: &str,
         pbs_srv: &pbs::Server,
     ) -> Result<(), ()> {
-        scheduler::offline_node(target, comment, operator, pbs_srv).await
+        scheduler::offline_node(target, comment, pbs_srv).await
     }
 }
 

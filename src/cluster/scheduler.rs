@@ -76,21 +76,16 @@ pub async fn nodes_status(pbs_srv: &Server) -> Result<HashMap<String, (TargetSta
     Ok(resp)
 }
 
-pub async fn release_node(target: &str, operator: &str, pbs_srv: &Server) -> Result<(), ()> {
-    info!("{} resuming node {}", operator, target);
+pub async fn release_node(target: &str, pbs_srv: &Server) -> Result<(), ()> {
+    info!("resuming node {}", target);
     if pbs_srv.clear_vnode(target, Some("")).is_err() {
         return Err(());
     }
     Ok(())
 }
 
-pub async fn offline_node(
-    target: &str,
-    comment: &str,
-    operator: &str,
-    pbs_srv: &Server,
-) -> Result<(), ()> {
-    info!("{} offlining: {}, {}", operator, target, comment);
+pub async fn offline_node(target: &str, comment: &str, pbs_srv: &Server) -> Result<(), ()> {
+    info!("offlining: {}, {}", target, comment);
     if pbs_srv.offline_vnode(target, Some(comment)).is_err() {
         return Err(());
     }
