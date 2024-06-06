@@ -1,6 +1,5 @@
 #![feature(let_chains)]
 #![feature(addr_parse_ascii)]
-#![feature(lazy_cell)]
 mod cluster;
 mod conf;
 mod entities;
