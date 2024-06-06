@@ -209,10 +209,9 @@ async fn check_blade(
 ) {
     debug!("Checking blade status for {}", target);
     {
-        let srv = Server::new();
         let nodes = cluster.cousins(target);
         // current status of nodes in blade
-        let current_status = cluster.nodes_status(&srv).await;
+        let current_status = cluster.nodes_status();
         if current_status.is_err() {
             warn!("issue getting nodes status");
             return;
@@ -233,9 +232,7 @@ async fn check_blade(
             let final_state = match expected_state {
                 TargetStatus::Draining => panic!("Expected state is never Draining"),
                 TargetStatus::Online => {
-                    if new_state != TargetStatus::Online
-                        && cluster.release_node(&target, &srv).await.is_err()
-                    {
+                    if new_state != TargetStatus::Online && cluster.release_node(&target).is_err() {
                         warn!("could not release node {}", &target);
                     }
                     let _ = tx
@@ -249,7 +246,7 @@ async fn check_blade(
                     TargetStatus::Draining => TargetStatus::Draining,
                     TargetStatus::Offline => TargetStatus::Offline,
                     state => {
-                        if cluster.offline_node(&target, &comment, &srv).await.is_err() {
+                        if cluster.offline_node(&target, &comment).is_err() {
                             warn!("could not release node {}", &target);
                         }
                         let _ = tx
@@ -361,6 +358,7 @@ pub async fn issue_open(
     }
     let target_id = target.id;
     {
+        //TODO don't use pbs server directly, instead use the ClusterTrait
         let srv = Server::new();
         let status = srv.stat_host(&None, None)?;
         for t in to_offline(&i.target, status, i.to_offline, cluster).into_iter() {

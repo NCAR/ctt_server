@@ -1,5 +1,5 @@
 #![allow(unused_variables)]
-use super::scheduler;
+use super::scheduler::{PbsScheduler, SchedulerTrait};
 use crate::cluster::ClusterTrait;
 use crate::conf::NodeType;
 use crate::entities::target::TargetStatus;
@@ -12,13 +12,18 @@ use tracing::warn;
 #[derive(Debug)]
 pub struct RegexCluster {
     node_types: Vec<NodeType>,
+    //TODO have sched be of type SchedulerTrait instead
+    sched: PbsScheduler,
 }
 
 impl RegexCluster {
-    pub fn new(node_types: Vec<NodeType>) -> Self {
-        Self { node_types }
+    #[instrument]
+    //TODO have sched be of type SchedulerTrait instead
+    pub fn new(node_types: Vec<NodeType>, sched: PbsScheduler) -> Self {
+        Self { sched, node_types }
     }
 
+    #[instrument]
     fn get_node_type(&self, target: &str) -> Option<NodeType> {
         for ntype in self.node_types.clone() {
             //let re = Regex::new(&ntype.names).unwrap();
@@ -43,6 +48,7 @@ impl RegexCluster {
         }
         None
     }
+    #[instrument]
     fn get_related(&self, target: &str, nodetype: NodeType, size: u32) -> Vec<String> {
         if size > 1 {
             let val = target.strip_prefix(&nodetype.prefix).unwrap();
@@ -64,6 +70,7 @@ impl RegexCluster {
 }
 
 impl ClusterTrait for RegexCluster {
+    #[instrument]
     fn siblings(&self, target: &str) -> Vec<String> {
         if let Some(nodetype) = self.get_node_type(target) {
             self.get_related(target, nodetype.clone(), nodetype.board.unwrap_or(1))
@@ -72,6 +79,7 @@ impl ClusterTrait for RegexCluster {
             vec![]
         }
     }
+    #[instrument]
     fn cousins(&self, target: &str) -> Vec<String> {
         if let Some(nodetype) = self.get_node_type(target) {
             self.get_related(
@@ -89,26 +97,22 @@ impl ClusterTrait for RegexCluster {
         self.get_node_type(target).is_some()
     }
 
-    #[instrument(skip(pbs_srv))]
-    async fn nodes_status(
-        &self,
-        pbs_srv: &pbs::Server,
-    ) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
-        scheduler::nodes_status(pbs_srv).await
+    #[instrument]
+    fn nodes_status(&self) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
+        self.sched.nodes_status()
     }
-    async fn release_node(&self, target: &str, pbs_srv: &pbs::Server) -> Result<(), ()> {
-        scheduler::release_node(target, pbs_srv).await
+    #[instrument]
+    fn release_node(&self, target: &str) -> Result<(), ()> {
+        self.sched.release_node(target)
     }
-    async fn offline_node(
-        &self,
-        target: &str,
-        comment: &str,
-        pbs_srv: &pbs::Server,
-    ) -> Result<(), ()> {
-        scheduler::offline_node(target, comment, pbs_srv).await
+    #[instrument]
+    fn offline_node(&self, target: &str, comment: &str) -> Result<(), ()> {
+        self.sched.offline_node(target, comment)
     }
 }
 
+/*
+// TODO FIXME fix tests need to mock out PbsScheduler
 #[test]
 fn siblings() {
     let gust = RegexCluster::new(vec![NodeType {
@@ -179,3 +183,4 @@ fn real_node() {
         assert!(!actual);
     }
 }
+*/

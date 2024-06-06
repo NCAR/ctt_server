@@ -1,4 +1,5 @@
 use crate::changelog;
+use crate::cluster::scheduler::PbsScheduler;
 use crate::cluster::ClusterTrait;
 use crate::cluster::RegexCluster;
 use crate::conf::Conf;
@@ -27,7 +28,7 @@ pub static PBS_LOCK: LazyLock<Mutex<u32>> = LazyLock::new(|| Mutex::new(0));
 #[instrument(skip(db, conf))]
 pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
     let mut interval = time::interval(Duration::from_secs(conf.poll_interval));
-    let cluster = RegexCluster::new(conf.node_types.clone());
+    let cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
@@ -37,8 +38,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         info!("performing sync with pbs");
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(changelog::slack_updater(rx, conf.clone()));
-        let pbs_srv = Server::new();
-        let pbs_node_state = cluster.nodes_status(&pbs_srv).await;
+        let pbs_node_state = cluster.nodes_status();
         if pbs_node_state.is_err() {
             warn!("could not get node state from cluster");
             continue;
@@ -60,17 +60,8 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         // sync ctt and pbs
         for (target, old_state) in &ctt_node_state {
             if let Some((new_state, pbs_comment)) = pbs_node_state.get(target) {
-                handle_transition(
-                    target,
-                    pbs_comment,
-                    old_state,
-                    new_state,
-                    &pbs_srv,
-                    db,
-                    &tx,
-                    &cluster,
-                )
-                .await;
+                handle_transition(target, pbs_comment, old_state, new_state, db, &tx, &cluster)
+                    .await;
             } else {
                 warn!("{} not found in pbs", target);
                 if let Some(new_issue) = crate::model::NewIssue::new(
@@ -211,14 +202,13 @@ pub async fn close_open_issues(target: &str, db: &DatabaseConnection, cluster: &
     }
 }
 
-#[instrument(skip(pbs_srv, db, tx))]
+#[instrument(skip(db, tx))]
 #[allow(clippy::too_many_arguments)]
 async fn handle_transition(
     target: &str,
     new_comment: &str,
     old_state: &TargetStatus,
     new_state: &TargetStatus,
-    pbs_srv: &Server,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<ChangeLogMsg>,
     cluster: &RegexCluster,
@@ -258,10 +248,7 @@ async fn handle_transition(
             TargetStatus::Offline => TargetStatus::Offline,
             state => {
                 info!("{} found in state {:?}, expected offline", target, state);
-                cluster
-                    .offline_node(target, &comment, pbs_srv)
-                    .await
-                    .unwrap();
+                cluster.offline_node(target, &comment).unwrap();
                 let _ = tx
                     .send(ChangeLogMsg::Offline {
                         target: target.to_string(),

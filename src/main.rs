@@ -19,6 +19,7 @@ use axum::{
 };
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
+use cluster::scheduler::PbsScheduler;
 use cluster::RegexCluster;
 use http::StatusCode;
 use setup::setup_and_connect;
@@ -76,7 +77,10 @@ async fn main() {
     let schema = Schema::build(model::Query, model::Mutation, EmptySubscription)
         .extension(Tracing)
         .data(db.clone())
-        .data(RegexCluster::new(conf.node_types.clone()))
+        .data(RegexCluster::new(
+            conf.node_types.clone(),
+            PbsScheduler::new(pbs::Server::new()),
+        ))
         .finish();
 
     // get certificate and private key used by https
