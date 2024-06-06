@@ -44,6 +44,82 @@ use std::sync::OnceLock;
 
 static CONFIG: OnceLock<Conf> = OnceLock::new();
 
+#[tokio::main]
+#[instrument]
+async fn main() {
+    // crash on panic
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default_panic(info);
+        std::process::exit(1);
+    }));
+
+    // setup config as global
+    let conf_file = env::args().nth(1);
+    let conf = conf::get_config(conf_file).expect("Error reading config file");
+    CONFIG.set(conf.clone()).unwrap();
+
+    // setup logging
+    let stdout_log = fmt::layer().json().with_writer(std::io::stderr);
+    let registry = tracing_subscriber::registry().with(
+        stdout_log.with_filter(
+            Targets::new()
+                //sqlx logs every query at INFO
+                .with_target("sqlx::query", Level::WARN)
+                .with_target("cttd", Level::DEBUG)
+                .with_default(Level::INFO),
+        ),
+    );
+    tracing::subscriber::set_global_default(registry).unwrap();
+
+    let db = Arc::new(setup_and_connect(&conf.db).await.unwrap());
+    let schema = Schema::build(model::Query, model::Mutation, EmptySubscription)
+        .extension(Tracing)
+        .data(db.clone())
+        .data(RegexCluster::new(conf.node_types.clone()))
+        .finish();
+
+    // get certificate and private key used by https
+    let keys = RustlsConfig::from_pem_file(
+        //PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        PathBuf::from(conf.certs_dir.clone()).join("cert.pem"),
+        PathBuf::from(conf.certs_dir.clone()).join("key.pem"),
+    )
+    .await
+    .unwrap();
+
+    let handle = Handle::new();
+    tokio::spawn(graceful_shutdown(handle.clone()));
+    tokio::spawn(pbs_sync::pbs_sync(db.clone(), conf.clone()));
+
+    let app = Router::new()
+        .route("/", get(graphiql))
+        .route("/api", post(graphql_handler))
+        .route_layer(Extension(schema))
+        .route("/api/schema", get(schema_handler))
+        .route_layer(ValidateRequestHeaderLayer::custom(conf.auth.clone()))
+        //login route can't be protected by auth
+        .route("/login", post(auth::login_handler))
+        //add logging and timeout to all requests
+        .layer(Extension(conf.clone()))
+        .layer(
+            ServiceBuilder::new()
+                // `timeout` will produce an error if the handler takes
+                // too long so we must handle those
+                .layer(tower_http::trace::TraceLayer::new_for_http())
+                .layer(HandleErrorLayer::new(handle_timeout))
+                .timeout(Duration::from_secs(60)),
+        );
+
+    // run https server
+    let addr = SocketAddr::parse_ascii(conf.server_addr.as_bytes()).unwrap();
+    axum_server::bind_rustls(addr, keys)
+        .handle(handle)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+}
+
 #[instrument(skip(schema, req))]
 async fn graphql_handler(
     schema: Extension<model::CttSchema>,
@@ -77,77 +153,6 @@ async fn handle_timeout(_: http::Method, _: http::Uri, _: axum::BoxError) -> (St
         StatusCode::INTERNAL_SERVER_ERROR,
         "request timed out".to_string(),
     )
-}
-
-#[tokio::main]
-#[instrument]
-async fn main() {
-    let default_panic = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        default_panic(info);
-        std::process::exit(1);
-    }));
-    let conf_file = env::args().nth(1);
-    let conf = conf::get_config(conf_file).expect("Error reading config file");
-    CONFIG.set(conf.clone()).unwrap();
-    let stdout_log = fmt::layer().json().with_writer(std::io::stderr);
-    let registry = tracing_subscriber::registry().with(
-        stdout_log.with_filter(
-            Targets::new()
-                .with_target("sqlx::query", Level::WARN)
-                .with_target("cttd", Level::DEBUG)
-                .with_default(Level::INFO),
-        ),
-    );
-    tracing::subscriber::set_global_default(registry).unwrap();
-
-    let db = Arc::new(setup_and_connect(&conf.db).await.unwrap());
-
-    let schema = Schema::build(model::Query, model::Mutation, EmptySubscription)
-        .extension(Tracing)
-        .data(db.clone())
-        .data(RegexCluster::new(conf.node_types.clone()))
-        .finish();
-
-    // configure certificate and private key used by https
-    let config = RustlsConfig::from_pem_file(
-        //PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        PathBuf::from(conf.certs_dir.clone()).join("cert.pem"),
-        PathBuf::from(conf.certs_dir.clone()).join("key.pem"),
-    )
-    .await
-    .unwrap();
-
-    let handle = Handle::new();
-    tokio::spawn(graceful_shutdown(handle.clone()));
-    tokio::spawn(pbs_sync::pbs_sync(db.clone(), conf.clone()));
-
-    let app = Router::new()
-        .route("/", get(graphiql))
-        .route("/api", post(graphql_handler))
-        .route_layer(Extension(schema))
-        .route("/api/schema", get(schema_handler))
-        .route_layer(ValidateRequestHeaderLayer::custom(conf.auth.clone()))
-        //login route can't be protected by auth
-        .route("/login", post(auth::login_handler))
-        //add logging and timeout to all requests
-        .layer(Extension(conf.clone()))
-        .layer(
-            ServiceBuilder::new()
-                // `timeout` will produce an error if the handler takes
-                // too long so we must handle those
-                .layer(tower_http::trace::TraceLayer::new_for_http())
-                .layer(HandleErrorLayer::new(handle_timeout))
-                .timeout(Duration::from_secs(60)),
-        );
-
-    // run https server
-    let addr = SocketAddr::parse_ascii(conf.server_addr.as_bytes()).unwrap();
-    axum_server::bind_rustls(addr, config)
-        .handle(handle)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
 }
 
 #[instrument]
