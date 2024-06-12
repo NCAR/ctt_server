@@ -109,17 +109,7 @@ impl Related<super::target::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-impl Entity {
-    pub async fn from_id(id: i32, db: &DatabaseConnection) -> Option<Model> {
-        let issue = Self::find_by_id(id).one(db).await;
-        if let Err(e) = issue {
-            warn!("Error getting issue {} by id: {}", id, e);
-            None
-        } else {
-            issue.unwrap()
-        }
-    }
-}
+impl Entity {}
 
 #[derive(
     Copy,

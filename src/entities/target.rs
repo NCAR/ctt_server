@@ -60,20 +60,11 @@ impl Entity {
             return None;
         }
         let target = target.unwrap();
+        // add the target to the db is its a real node, but hasn't been added yet
         if target.is_none() {
             Self::create_target(name, TargetStatus::Online, db, cluster).await
         } else {
             target
-        }
-    }
-    #[instrument]
-    pub async fn from_id(id: i32, db: &DatabaseConnection) -> Option<Model> {
-        let target = Self::find_by_id(id).one(db).await;
-        if let Err(e) = target {
-            warn!("Error getting target {} by id: {}", id, e);
-            None
-        } else {
-            target.unwrap()
         }
     }
 

@@ -78,12 +78,10 @@ async fn issue_update(
     }
     let issue = issue.unwrap();
     let mut updated_issue: issue::ActiveModel = issue.clone().into();
-    if let Some(_) = &i.assigned_to
+    if let Some(s) = &i.assigned_to
         && i.assigned_to != issue.assigned_to
     {
-        if let Some(s) = &i.assigned_to
-            && s.is_empty()
-        {
+        if s.is_empty() {
             updated_issue.assigned_to = ActiveValue::Set(None);
         } else {
             updated_issue.assigned_to = ActiveValue::Set(i.assigned_to.clone());
