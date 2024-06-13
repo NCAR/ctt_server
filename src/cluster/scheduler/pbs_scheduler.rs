@@ -25,14 +25,15 @@ impl fmt::Debug for PbsScheduler {
 
 impl SchedulerTrait for PbsScheduler {
     #[instrument]
-    fn nodes_status(&self) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
+    fn nodes_status(&self) -> Result<HashMap<String, (TargetStatus, String)>, String> {
         //TODO filter stat attribs (just need hostname, jobs, and state)
         //TODO consider calling pbs_srv.stat_vnode from a spawn_blocking task
         //TODO add a timeout
         let mut resp = HashMap::new();
         let vnode_stat = self.srv.stat_vnode(&None, None);
-        if vnode_stat.is_err() {
-            return Err(());
+        if let Err(e) = vnode_stat {
+            warn!("error statting vnode: {}", e);
+            return Err(e);
         }
         for n in vnode_stat.unwrap().resources.iter() {
             let name = n.name();

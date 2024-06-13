@@ -32,6 +32,7 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
+        interval.tick().await;
         // don't want multiple ctt threads messing with scheduler concurrently
         let sched_lock = PBS_LOCK.lock().await;
         let db = db.as_ref();
@@ -39,8 +40,8 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(changelog::slack_updater(rx, conf.clone()));
         let pbs_node_state = cluster.nodes_status();
-        if pbs_node_state.is_err() {
-            warn!("could not get node state from cluster");
+        if let Err(e) = pbs_node_state {
+            warn!("could not get node state from cluster: {}", e);
             continue;
         }
         let pbs_node_state = pbs_node_state.unwrap();
@@ -80,7 +81,6 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         }
         info!("pbs sync complete");
         drop(sched_lock);
-        interval.tick().await;
     }
 }
 

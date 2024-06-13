@@ -98,7 +98,7 @@ impl ClusterTrait for RegexCluster {
     }
 
     #[instrument]
-    fn nodes_status(&self) -> Result<HashMap<String, (TargetStatus, String)>, ()> {
+    fn nodes_status(&self) -> Result<HashMap<String, (TargetStatus, String)>, String> {
         self.sched.nodes_status()
     }
     #[instrument]
