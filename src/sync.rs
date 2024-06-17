@@ -119,6 +119,82 @@ pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetSta
         .collect()
 }
 
+pub async fn related_closing(
+    target: &str,
+    db: &DatabaseConnection,
+    cluster: &RegexCluster,
+) -> Vec<entities::issue::Model> {
+    let mut issues = Vec::new();
+    let t = entities::target::Entity::from_name(target, db, cluster).await;
+    let t = match t {
+        None => return issues,
+        Some(t) => {
+            for iss in t
+                .issues()
+                .filter(entities::issue::Column::Status.eq(IssueStatus::Closing))
+                .filter(Expr::col(entities::issue::Column::ToOffline).is_not_null())
+                .all(db)
+                .await
+                .unwrap()
+            {
+                issues.push(iss);
+            }
+            t
+        }
+    };
+    for c in cluster.siblings(target) {
+        match entities::target::Entity::from_name(&c, db, cluster).await {
+            None => warn!("expected sibling {} doesn't exist", c),
+            Some(t) => {
+                if t.name == target {
+                    continue;
+                }
+                for iss in t
+                    .issues()
+                    .filter(entities::issue::Column::Status.eq(IssueStatus::Closing))
+                    .filter(entities::issue::Column::ToOffline.eq(Some(ToOffline::Card)))
+                    .all(db)
+                    .await
+                    .unwrap()
+                {
+                    issues.push(iss);
+                }
+            }
+        };
+    }
+    for c in cluster.cousins(target) {
+        match entities::target::Entity::from_name(&c, db, cluster).await {
+            None => warn!("expected sibling {} doesn't exist", c),
+            Some(t) => {
+                if t.name == target {
+                    continue;
+                }
+                for iss in t
+                    .issues()
+                    .filter(entities::issue::Column::Status.eq(IssueStatus::Closing))
+                    .filter(entities::issue::Column::ToOffline.eq(Some(ToOffline::Blade)))
+                    .all(db)
+                    .await
+                    .unwrap()
+                {
+                    issues.push(iss);
+                }
+            }
+        };
+    }
+    for iss in t
+        .issues()
+        .filter(entities::issue::Column::Status.eq(IssueStatus::Closing))
+        .filter(Expr::col(entities::issue::Column::ToOffline).is_null())
+        .all(db)
+        .await
+        .unwrap()
+    {
+        issues.push(iss);
+    }
+    issues
+}
+
 #[instrument(skip(db))]
 pub async fn desired_state(
     target: &str,
@@ -249,45 +325,33 @@ async fn handle_transition(
         TargetStatus::Online => {
             if *new_state == TargetStatus::Online {
                 TargetStatus::Online
+            } else if !related_closing(target, db, cluster).await.is_empty() {
+                info!("resuming {}, all open issues are Closing", target);
+                cluster.release_node(target).unwrap();
+                let _ = tx
+                    .send(ChangeLogMsg::Resume {
+                        target: target.to_string(),
+                    })
+                    .await;
+                TargetStatus::Online
             } else {
-                let t = entities::target::Entity::from_name(target, db, cluster)
-                    .await
-                    .unwrap();
-                if !t
-                    .issues()
-                    .filter(entities::issue::Column::Status.eq(IssueStatus::Closing))
-                    .all(db)
-                    .await
-                    .unwrap()
-                    .is_empty()
-                {
-                    info!("resuming {}, all open issues are Closing", target);
-                    cluster.release_node(target).unwrap();
-                    let _ = tx
-                        .send(ChangeLogMsg::Resume {
-                            target: target.to_string(),
-                        })
-                        .await;
-                    TargetStatus::Online
-                } else {
-                    // expected node to be online, but it wasn't so open an issue
-                    // we know no issues are currently open since expected state
-                    // would not be online if there were
-                    if let Some(new_issue) = crate::model::NewIssue::new(
-                        None,
-                        new_comment.to_string(),
-                        new_comment.to_string(),
-                        target.to_string(),
-                        None,
-                        cluster,
-                    ) {
-                        info!("opening issue for {}: {}", target, new_comment);
-                        mutation::issue_open(&new_issue, "ctt", db, tx, cluster)
-                            .await
-                            .unwrap();
-                    }
-                    *new_state
+                // expected node to be online, but it wasn't so open an issue
+                // we know no issues are currently open since expected state
+                // would not be online if there were
+                if let Some(new_issue) = crate::model::NewIssue::new(
+                    None,
+                    new_comment.to_string(),
+                    new_comment.to_string(),
+                    target.to_string(),
+                    None,
+                    cluster,
+                ) {
+                    info!("opening issue for {}: {}", target, new_comment);
+                    mutation::issue_open(&new_issue, "ctt", db, tx, cluster)
+                        .await
+                        .unwrap();
                 }
+                *new_state
             }
         }
         TargetStatus::Offline => match new_state {
