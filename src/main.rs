@@ -73,10 +73,12 @@ async fn main() {
     );
     tracing::subscriber::set_global_default(registry).unwrap();
 
+    let (tx, rx): (mpsc::Sender<ChangeLogMsg>, mpsc::Receiver<ChangeLogMsg>) = mpsc::channel(10);
     let db = Arc::new(setup_and_connect(&conf.db).await.unwrap());
     let schema = Schema::build(model::Query, model::Mutation, EmptySubscription)
         .extension(Tracing)
         .data(db.clone())
+        .data(tx.clone())
         .data(RegexCluster::new(
             conf.node_types.clone(),
             PbsScheduler::new(pbs::Server::new()),
@@ -94,7 +96,8 @@ async fn main() {
 
     let handle = Handle::new();
     tokio::spawn(graceful_shutdown(handle.clone()));
-    tokio::spawn(sync::cluster_sync(db.clone(), conf.clone()));
+    tokio::spawn(sync::cluster_sync(db.clone(), conf.clone(), tx));
+    tokio::spawn(changelog::slack_updater(rx, CONFIG.get().unwrap().clone()));
 
     let app = Router::new()
         .route("/", get(graphiql))
@@ -130,11 +133,8 @@ async fn graphql_handler(
     Extension(role): Extension<auth::RoleGuard>,
     req: GraphQLRequest,
 ) -> GraphQLResponse {
-    let (tx, rx) = mpsc::channel(5);
-    tokio::spawn(changelog::slack_updater(rx, CONFIG.get().unwrap().clone()));
     let mut req = req.into_inner();
     req = req.data(role);
-    req = req.data(tx);
     let resp = schema.execute(req).await;
     info!("{:?}", &resp);
     resp.into()

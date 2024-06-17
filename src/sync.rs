@@ -1,4 +1,3 @@
-use crate::changelog;
 use crate::cluster::scheduler::PbsScheduler;
 use crate::cluster::ClusterTrait;
 use crate::cluster::RegexCluster;
@@ -23,7 +22,7 @@ use tokio::time;
 use tracing::{debug, info, instrument, trace, warn};
 
 #[instrument(skip(db, conf))]
-pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf) {
+pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sender<ChangeLogMsg>) {
     let mut interval = time::interval(Duration::from_secs(conf.poll_interval));
     let mut cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
     // don't let ticks stack up if a sync takes longer than interval
@@ -33,8 +32,6 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         // don't want multiple ctt threads messing with scheduler concurrently
         let db = db.as_ref();
         info!("performing sync with pbs");
-        let (tx, rx) = mpsc::channel(5);
-        tokio::spawn(changelog::slack_updater(rx, conf.clone()));
         let mut pbs_node_state = cluster.nodes_status();
         if let Err(ref e) = pbs_node_state
             && e == "Expired credential"
