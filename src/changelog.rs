@@ -127,7 +127,7 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                 // don't care if its ctt doing anything besides offlining nodes (no operators and no
                 // offline_nodes or if no nodes state is being changed (no resume_nodes or offline_nodes)
                 if (operators.is_empty() || resume_nodes.is_empty()) && offline_nodes.is_empty() {
-                    return;
+                    continue;
                 }
 
                 let session = client.open_session(&token);
