@@ -3,6 +3,7 @@ use crate::cluster::{ClusterTrait, RegexCluster};
 use crate::entities::comment;
 use crate::entities::issue::{self, IssueStatus};
 use crate::entities::prelude::*;
+use crate::entities::target::TargetStatus;
 use crate::ChangeLogMsg;
 use async_graphql::{Context, InputObject, Object, Result};
 use chrono::Utc;
@@ -146,6 +147,44 @@ async fn issue_update(
         .await;
     updated_issue.updated_at = ActiveValue::Set(Utc::now().naive_utc());
     updated_issue.update(db).await.unwrap();
+    //TODO FIXME how to handle a reduction in to_offline? (blade->card->node)
+    //sync code doesn't know a node was offline due to being a sibling, so it will
+    //open a new ticket for the sibling instead of resuming it
+    //resuming nodes here for now instead of the sync loop since its easier
+    if let Some(t_o) = issue.to_offline {
+        let cluster = ctx.data::<RegexCluster>().unwrap();
+        let target = issue.target(ctx).await.unwrap().unwrap().name;
+        let cousins = cluster.cousins(&target);
+        let siblings = cluster.siblings(&target);
+
+        //t_o != i.to_offline therefore issue no longer enforces cousins being down
+        if t_o == issue::ToOffline::Blade {
+            //resume cousins (but not siblings)
+            for c in cousins {
+                if c == target || siblings.contains(&c) {
+                    continue;
+                }
+                //TODO only do if no other open related issues
+                let (desired_node_state, _) = crate::sync::desired_state(&c, db, cluster).await;
+                if desired_node_state == TargetStatus::Online {
+                    cluster.release_node(&c).unwrap();
+                }
+            }
+        }
+
+        //t_o is something, and != i.to_offline, so issue no longer enforces sibling being down
+        if i.to_offline.unwrap() == issue::ToOffline::Node {
+            for s in siblings {
+                if s == target {
+                    continue;
+                }
+                let (desired_node_state, _) = crate::sync::desired_state(&s, db, cluster).await;
+                if desired_node_state == TargetStatus::Online {
+                    cluster.release_node(&s).unwrap();
+                }
+            }
+        }
+    }
     Ok(Issue::find_by_id(i.id).one(db).await.unwrap().unwrap())
 }
 
