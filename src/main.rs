@@ -94,7 +94,7 @@ async fn main() {
 
     let handle = Handle::new();
     tokio::spawn(graceful_shutdown(handle.clone()));
-    tokio::spawn(sync::pbs_sync(db.clone(), conf.clone()));
+    tokio::spawn(sync::cluster_sync(db.clone(), conf.clone()));
 
     let app = Router::new()
         .route("/", get(graphiql))

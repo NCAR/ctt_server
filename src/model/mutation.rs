@@ -3,19 +3,15 @@ use crate::cluster::{ClusterTrait, RegexCluster};
 use crate::entities::comment;
 use crate::entities::issue::{self, IssueStatus};
 use crate::entities::prelude::*;
-use crate::entities::target::{self, TargetStatus};
-use crate::sync::PBS_LOCK;
-use crate::{entities, ChangeLogMsg};
+use crate::ChangeLogMsg;
 use async_graphql::{Context, InputObject, Object, Result};
 use chrono::Utc;
-use pbs::Server;
 use sea_orm::entity::ActiveValue;
 use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, QueryFilter};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{debug, info, instrument, warn};
+use tracing::{info, instrument, warn};
 
 #[derive(InputObject, Debug)]
 pub struct UpdateIssue {
@@ -70,7 +66,6 @@ async fn issue_update(
     ctx: &Context<'_>,
 ) -> Result<issue::Model, String> {
     let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
-    let cluster = ctx.data::<RegexCluster>().unwrap();
     let tx = &ctx.data_opt::<mpsc::Sender<ChangeLogMsg>>().unwrap();
     let issue = Issue::find_by_id(i.id).one(db).await.unwrap();
     if issue.is_none() {
@@ -140,41 +135,6 @@ async fn issue_update(
             ..Default::default()
         };
         c.insert(db).await.unwrap();
-        {
-            let srv = Server::new();
-            let status = srv.stat_host(&None, None)?;
-            let target = issue.target(ctx).await.unwrap().unwrap();
-            for t in to_offline(&target.name, status, i.to_offline, cluster).into_iter() {
-                srv.offline_vnode(
-                    &t,
-                    Some(&format!(
-                        "{} sibling",
-                        &issue.target(ctx).await.unwrap().unwrap().name
-                    )),
-                )?;
-                let _ = tx
-                    .send(ChangeLogMsg::Offline {
-                        target: t.to_string(),
-                    })
-                    .await;
-                let mut sib: target::ActiveModel =
-                    Target::from_name(&t, db, cluster).await.unwrap().into();
-                sib.status = ActiveValue::Set(TargetStatus::Draining);
-                sib.update(db).await.unwrap();
-            }
-            //TODO only try offlining if it isn't draining already
-            if i.to_offline.is_some() {
-                let _ = srv.offline_vnode(&target.name, Some(&issue.title));
-                let _ = tx
-                    .send(ChangeLogMsg::Offline {
-                        target: target.name.to_string(),
-                    })
-                    .await;
-                let mut t: target::ActiveModel = target.into();
-                t.status = ActiveValue::Set(TargetStatus::Draining);
-                t.update(db).await.unwrap();
-            }
-        }
     }
     info!("Updating issue {}: {:?}", issue.id, updated_issue);
     let _ = tx
@@ -186,107 +146,7 @@ async fn issue_update(
         .await;
     updated_issue.updated_at = ActiveValue::Set(Utc::now().naive_utc());
     updated_issue.update(db).await.unwrap();
-    check_blade(
-        &issue.target(ctx).await.unwrap().unwrap().name,
-        db,
-        tx,
-        cluster,
-        operator,
-    )
-    .await;
     Ok(Issue::find_by_id(i.id).one(db).await.unwrap().unwrap())
-}
-
-#[instrument]
-async fn check_blade(
-    target: &str,
-    db: &DatabaseConnection,
-    tx: &mpsc::Sender<ChangeLogMsg>,
-    cluster: &RegexCluster,
-    operator: &str,
-) {
-    debug!("Checking blade status for {}", target);
-    {
-        let nodes = cluster.cousins(target);
-        // current status of nodes in blade
-        let current_status = cluster.nodes_status();
-        if current_status.is_err() {
-            warn!("issue getting nodes status");
-            return;
-        }
-        let current_status: HashMap<String, (TargetStatus, String)> = current_status
-            .unwrap()
-            .into_iter()
-            .filter(|n| nodes.iter().any(|t| n.0.eq(t)))
-            .collect();
-
-        for (target, (new_state, _new_comment)) in current_status {
-            let (expected_state, comment) = crate::sync::desired_state(&target, db, cluster).await;
-            //almost the same as crate::sync::handle_transition, but different logic
-            //e.g. release a node if expected online but found offline
-            //TODO combine with handle_transition since everything except expected online found not
-            //online is the same
-
-            let final_state = match expected_state {
-                TargetStatus::Draining => panic!("Expected state is never Draining"),
-                TargetStatus::Online => {
-                    if new_state != TargetStatus::Online && cluster.release_node(&target).is_err() {
-                        warn!("could not release node {}", &target);
-                    }
-                    let _ = tx
-                        .send(ChangeLogMsg::Resume {
-                            target: target.to_string(),
-                        })
-                        .await;
-                    TargetStatus::Online
-                }
-                TargetStatus::Offline => match new_state {
-                    TargetStatus::Draining => TargetStatus::Draining,
-                    TargetStatus::Offline => TargetStatus::Offline,
-                    state => {
-                        if cluster.offline_node(&target, &comment).is_err() {
-                            warn!("could not release node {}", &target);
-                        }
-                        let _ = tx
-                            .send(ChangeLogMsg::Offline {
-                                target: target.to_string(),
-                            })
-                            .await;
-                        if state == TargetStatus::Down {
-                            TargetStatus::Offline
-                        } else {
-                            // node was online, might have running jobs
-                            TargetStatus::Draining
-                        }
-                    }
-                },
-                TargetStatus::Down => match new_state {
-                    TargetStatus::Draining => TargetStatus::Draining,
-                    TargetStatus::Down => TargetStatus::Down,
-                    TargetStatus::Offline => TargetStatus::Offline,
-                    TargetStatus::Online => {
-                        info!("Closing issues for {}", &target);
-                        crate::sync::close_open_issues(&target, db, cluster).await;
-                        TargetStatus::Online
-                    }
-                },
-            };
-            debug!(
-                "target: {}, current: {:?}, expected: {:?}, final: {:?}",
-                &target, &new_state, &expected_state, &final_state
-            );
-            let old_state = crate::sync::get_ctt_nodes(db).await;
-            //dont update state if it hasn't changed
-            if *old_state.get(&target).unwrap() != final_state {
-                let node = entities::target::Entity::from_name(&target, db, cluster)
-                    .await
-                    .unwrap();
-                let mut updated_target: entities::target::ActiveModel = node.into();
-                updated_target.status = ActiveValue::Set(final_state);
-                updated_target.update(db).await.unwrap();
-            }
-        }
-    }
 }
 
 #[instrument]
@@ -355,37 +215,13 @@ pub async fn issue_open(
         return Ok(i);
     }
     let target_id = target.id;
-    {
-        //TODO don't use pbs server directly, instead use the ClusterTrait
-        let srv = Server::new();
-        let status = srv.stat_host(&None, None)?;
-        for t in to_offline(&i.target, status, i.to_offline, cluster).into_iter() {
-            srv.offline_vnode(&t, Some(&format!("{} sibling", &i.target)))?;
-            let _ = tx.send(ChangeLogMsg::Offline { target: t.clone() }).await;
-            let mut sib: target::ActiveModel =
-                Target::from_name(&t, db, cluster).await.unwrap().into();
-            sib.status = ActiveValue::Set(TargetStatus::Draining);
-            sib.update(db).await.unwrap();
-        }
-        if i.to_offline.is_some() {
-            let _ = srv.offline_vnode(&i.target, Some(&i.title));
-            let _ = tx
-                .send(ChangeLogMsg::Offline {
-                    target: i.target.clone(),
-                })
-                .await;
-            let mut target: target::ActiveModel = target.into();
-            target.status = ActiveValue::Set(TargetStatus::Draining);
-            target.update(db).await.unwrap();
-        }
-    }
 
     let new_issue = issue::ActiveModel {
         assigned_to: ActiveValue::Set(i.assigned_to.clone()),
         created_by: ActiveValue::Set(operator.to_string()),
         description: ActiveValue::Set(i.description.clone()),
         to_offline: ActiveValue::Set(i.to_offline),
-        status: ActiveValue::Set(IssueStatus::Open),
+        status: ActiveValue::Set(IssueStatus::Opening),
         target_id: ActiveValue::Set(target_id),
         title: ActiveValue::Set(i.title.clone()),
         ..Default::default()
@@ -416,17 +252,16 @@ async fn issue_close(
     ctx: &Context<'_>,
 ) -> Result<String, String> {
     let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
-    let cluster = ctx.data::<RegexCluster>().unwrap();
     let issue = Issue::find_by_id(cttissue).one(db).await.unwrap().unwrap();
     let target = issue.target(ctx).await.unwrap().unwrap();
-    if issue.status == IssueStatus::Open {
+    if issue.status == IssueStatus::Open || issue.status == IssueStatus::Opening {
         info!(
             "Closing ticket {} for {}: {}",
             cttissue, target.name, comment
         );
         let title = issue.title.clone();
         let mut issue: issue::ActiveModel = issue.into();
-        issue.status = ActiveValue::Set(IssueStatus::Closed);
+        issue.status = ActiveValue::Set(IssueStatus::Closing);
         issue.update(db).await.unwrap();
         let c = comment::ActiveModel {
             created_by: ActiveValue::Set(operator.clone()),
@@ -444,7 +279,6 @@ async fn issue_close(
                 title,
             })
             .await;
-        check_blade(&target.name, db, tx, cluster, &operator).await;
     }
     Ok(format!("closed {}", cttissue))
 }
@@ -454,14 +288,12 @@ impl Mutation {
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     #[instrument(skip(ctx))]
     async fn open<'a>(&self, ctx: &Context<'a>, issue: NewIssue) -> Result<issue::Model, String> {
-        let sched_lock = PBS_LOCK.lock().await;
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = ctx.data_opt::<mpsc::Sender<ChangeLogMsg>>().unwrap();
         let db = ctx.data_opt::<Arc<DatabaseConnection>>().unwrap().as_ref();
         let cluster = ctx.data::<RegexCluster>().unwrap();
-        let ret = issue_open(&issue, usr, db, tx, cluster).await;
-        drop(sched_lock);
-        ret
+
+        issue_open(&issue, usr, db, tx, cluster).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     #[instrument(skip(ctx))]
@@ -471,11 +303,9 @@ impl Mutation {
         issue: i32,
         comment: String,
     ) -> Result<String, String> {
-        let sched_lock = PBS_LOCK.lock().await;
         let usr: String = ctx.data_opt::<RoleGuard>().unwrap().user.clone();
-        let ret = issue_close(issue, usr, comment, ctx).await;
-        drop(sched_lock);
-        ret
+
+        issue_close(issue, usr, comment, ctx).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     #[instrument(skip(ctx))]
@@ -484,10 +314,8 @@ impl Mutation {
         ctx: &Context<'a>,
         issue: UpdateIssue,
     ) -> Result<issue::Model, String> {
-        let sched_lock = PBS_LOCK.lock().await;
         let usr: String = ctx.data_opt::<RoleGuard>().unwrap().user.clone();
-        let ret = issue_update(issue, &usr, ctx).await;
-        drop(sched_lock);
-        ret
+
+        issue_update(issue, &usr, ctx).await
     }
 }

@@ -171,6 +171,8 @@ enum IssueStatus {
     Table,
     Open,
     Closed,
+    Opening,
+    Closing,
 }
 
 #[derive(Iden, EnumIter)]

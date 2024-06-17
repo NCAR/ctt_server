@@ -129,6 +129,10 @@ pub enum IssueStatus {
     Open,
     #[sea_orm(string_value = "Closed")]
     Closed,
+    #[sea_orm(string_value = "Opening")]
+    Opening,
+    #[sea_orm(string_value = "Closing")]
+    Closing,
 }
 
 #[derive(

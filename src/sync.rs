@@ -11,22 +11,19 @@ use crate::model::mutation;
 use crate::ChangeLogMsg;
 use pbs::Server;
 use sea_orm::prelude::Expr;
+use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, QuerySelect};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use sea_orm::DatabaseConnection;
-use std::sync::LazyLock;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{debug, info, instrument, trace, warn};
 
-pub static PBS_LOCK: LazyLock<Mutex<u32>> = LazyLock::new(|| Mutex::new(0));
-
 #[instrument(skip(db, conf))]
-pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
+pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf) {
     let mut interval = time::interval(Duration::from_secs(conf.poll_interval));
     let mut cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
     // don't let ticks stack up if a sync takes longer than interval
@@ -34,7 +31,6 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
     loop {
         interval.tick().await;
         // don't want multiple ctt threads messing with scheduler concurrently
-        let sched_lock = PBS_LOCK.lock().await;
         let db = db.as_ref();
         info!("performing sync with pbs");
         let (tx, rx) = mpsc::channel(5);
@@ -86,8 +82,25 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
                 }
             }
         }
+        entities::issue::Entity::update_many()
+            .col_expr(
+                entities::issue::Column::Status,
+                Expr::value(IssueStatus::Open),
+            )
+            .filter(entities::issue::Column::Status.eq(IssueStatus::Opening))
+            .exec(db)
+            .await
+            .unwrap();
+        entities::issue::Entity::update_many()
+            .col_expr(
+                entities::issue::Column::Status,
+                Expr::value(IssueStatus::Closed),
+            )
+            .filter(entities::issue::Column::Status.eq(IssueStatus::Closing))
+            .exec(db)
+            .await
+            .unwrap();
         info!("pbs sync complete");
-        drop(sched_lock);
     }
 }
 
@@ -121,7 +134,10 @@ pub async fn desired_state(
         Some(t) => {
             if let Some(iss) = t
                 .issues()
-                .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+                .filter(
+                    entities::issue::Column::Status
+                        .is_in([IssueStatus::Open, IssueStatus::Opening]),
+                )
                 .filter(Expr::col(entities::issue::Column::ToOffline).is_not_null())
                 .one(db)
                 .await
@@ -138,7 +154,10 @@ pub async fn desired_state(
             None => warn!("expected sibling {} doesn't exist", c),
             Some(t) => {
                 if t.issues()
-                    .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+                    .filter(
+                        entities::issue::Column::Status
+                            .is_in([IssueStatus::Open, IssueStatus::Opening]),
+                    )
                     .filter(entities::issue::Column::ToOffline.eq(Some(ToOffline::Card)))
                     .one(db)
                     .await
@@ -156,7 +175,10 @@ pub async fn desired_state(
             None => warn!("expected sibling {} doesn't exist", c),
             Some(t) => {
                 if t.issues()
-                    .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+                    .filter(
+                        entities::issue::Column::Status
+                            .is_in([IssueStatus::Open, IssueStatus::Opening]),
+                    )
                     .filter(entities::issue::Column::ToOffline.eq(Some(ToOffline::Blade)))
                     .one(db)
                     .await
@@ -171,7 +193,7 @@ pub async fn desired_state(
     }
     if let Some(iss) = t
         .issues()
-        .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+        .filter(entities::issue::Column::Status.is_in([IssueStatus::Open, IssueStatus::Opening]))
         .filter(Expr::col(entities::issue::Column::ToOffline).is_null())
         .one(db)
         .await
@@ -190,7 +212,7 @@ pub async fn close_open_issues(target: &str, db: &DatabaseConnection, cluster: &
         .await
         .unwrap()
         .issues()
-        .filter(entities::issue::Column::Status.eq(IssueStatus::Open))
+        .filter(entities::issue::Column::Status.ne(IssueStatus::Closed))
         .all(db)
         .await
         .unwrap()
@@ -231,23 +253,44 @@ async fn handle_transition(
             if *new_state == TargetStatus::Online {
                 TargetStatus::Online
             } else {
-                // expected node to be online, but it wasn't so open an issue
-                // we know no issues are currently open since expected state
-                // would not be online if there were
-                if let Some(new_issue) = crate::model::NewIssue::new(
-                    None,
-                    new_comment.to_string(),
-                    new_comment.to_string(),
-                    target.to_string(),
-                    None,
-                    cluster,
-                ) {
-                    info!("opening issue for {}: {}", target, new_comment);
-                    mutation::issue_open(&new_issue, "ctt", db, tx, cluster)
-                        .await
-                        .unwrap();
+                let t = entities::target::Entity::from_name(target, db, cluster)
+                    .await
+                    .unwrap();
+                if !t
+                    .issues()
+                    .filter(entities::issue::Column::Status.eq(IssueStatus::Closing))
+                    .all(db)
+                    .await
+                    .unwrap()
+                    .is_empty()
+                {
+                    info!("resuming {}, all open issues are Closing", target);
+                    cluster.release_node(target).unwrap();
+                    let _ = tx
+                        .send(ChangeLogMsg::Resume {
+                            target: target.to_string(),
+                        })
+                        .await;
+                    TargetStatus::Online
+                } else {
+                    // expected node to be online, but it wasn't so open an issue
+                    // we know no issues are currently open since expected state
+                    // would not be online if there were
+                    if let Some(new_issue) = crate::model::NewIssue::new(
+                        None,
+                        new_comment.to_string(),
+                        new_comment.to_string(),
+                        target.to_string(),
+                        None,
+                        cluster,
+                    ) {
+                        info!("opening issue for {}: {}", target, new_comment);
+                        mutation::issue_open(&new_issue, "ctt", db, tx, cluster)
+                            .await
+                            .unwrap();
+                    }
+                    *new_state
                 }
-                *new_state
             }
         }
         TargetStatus::Offline => match new_state {
