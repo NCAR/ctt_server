@@ -1,5 +1,5 @@
 use crate::auth::{Role, RoleChecker};
-use crate::entities::issue;
+use crate::entities::issue::{self, IssueStatus};
 use crate::entities::prelude::*;
 use crate::entities::target;
 use async_graphql::{Context, Object};
@@ -32,6 +32,10 @@ impl Query {
         if let Some(status) = issue_status {
             select =
                 select.filter(<issue::Entity as sea_orm::EntityTrait>::Column::Status.eq(status));
+        } else {
+            select = select.filter(
+                <issue::Entity as sea_orm::EntityTrait>::Column::Status.ne(IssueStatus::Closed),
+            );
         }
         if let Some(t) = target {
             select = select.filter(<target::Entity as sea_orm::EntityTrait>::Column::Name.eq(t));
