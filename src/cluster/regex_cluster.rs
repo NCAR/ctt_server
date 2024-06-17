@@ -18,6 +18,11 @@ pub struct RegexCluster {
 
 impl RegexCluster {
     #[instrument]
+    pub fn refresh_conn(&mut self) {
+        self.sched.refresh_conn();
+    }
+
+    #[instrument]
     //TODO have sched be of type SchedulerTrait instead
     pub fn new(node_types: Vec<NodeType>, sched: PbsScheduler) -> Self {
         Self { sched, node_types }

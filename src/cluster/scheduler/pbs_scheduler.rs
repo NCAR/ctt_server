@@ -15,6 +15,10 @@ impl PbsScheduler {
     pub fn new(srv: Server) -> Self {
         Self { srv }
     }
+
+    pub fn refresh_conn(&mut self) {
+        self.srv = Server::new()
+    }
 }
 
 impl fmt::Debug for PbsScheduler {

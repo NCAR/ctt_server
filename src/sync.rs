@@ -28,7 +28,7 @@ pub static PBS_LOCK: LazyLock<Mutex<u32>> = LazyLock::new(|| Mutex::new(0));
 #[instrument(skip(db, conf))]
 pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
     let mut interval = time::interval(Duration::from_secs(conf.poll_interval));
-    let cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
+    let mut cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
@@ -39,7 +39,14 @@ pub async fn pbs_sync(db: Arc<DatabaseConnection>, conf: Conf) {
         info!("performing sync with pbs");
         let (tx, rx) = mpsc::channel(5);
         tokio::spawn(changelog::slack_updater(rx, conf.clone()));
-        let pbs_node_state = cluster.nodes_status();
+        let mut pbs_node_state = cluster.nodes_status();
+        if let Err(ref e) = pbs_node_state
+            && e == "Expired credential"
+        {
+            info!("refreshing conn, existing one has expired");
+            cluster.refresh_conn();
+            pbs_node_state = cluster.nodes_status();
+        }
         if let Err(e) = pbs_node_state {
             warn!("could not get node state from cluster: {}", e);
             continue;
