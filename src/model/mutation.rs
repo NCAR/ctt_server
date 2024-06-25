@@ -158,6 +158,7 @@ async fn issue_update(
     //open a new ticket for the sibling instead of resuming it
     //resuming nodes here for now instead of the sync loop since its easier
     if let Some(t_o) = issue.to_offline
+        && i.to_offline.is_some()
         && i.to_offline != issue.to_offline
     {
         let cluster = ctx.data::<RegexCluster>().unwrap();
