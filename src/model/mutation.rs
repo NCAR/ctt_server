@@ -164,10 +164,15 @@ async fn issue_update(
                 if c == target || siblings.contains(&c) {
                     continue;
                 }
-                //TODO only do if no other open related issues
                 let (desired_node_state, _) = crate::sync::desired_state(&c, db, cluster).await;
                 if desired_node_state == TargetStatus::Online {
+                    //TODO add changelog msg
                     cluster.release_node(&c).unwrap();
+                    let _ = tx
+                        .send(ChangeLogMsg::Resume {
+                            target: c.to_string(),
+                        })
+                        .await;
                 }
             }
         }
@@ -180,7 +185,13 @@ async fn issue_update(
                 }
                 let (desired_node_state, _) = crate::sync::desired_state(&s, db, cluster).await;
                 if desired_node_state == TargetStatus::Online {
+                    //TODO add changelog msg
                     cluster.release_node(&s).unwrap();
+                    let _ = tx
+                        .send(ChangeLogMsg::Resume {
+                            target: s.to_string(),
+                        })
+                        .await;
                 }
             }
         }

@@ -132,28 +132,15 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
 
                 let session = client.open_session(&token);
 
-                let msg = if !open_issues.is_empty() {
-                    format!(
-                        "{:?} Opening issues: {:?}, Offlining {:?}",
-                        operators,
-                        open_issues,
-                        offline_nodes,
-                    )
-                } else if !update_issues.is_empty() {
-                    format!(
-                        "{:?} Updating issues: {:?}, Offlining: {:?}, Resuming: {:?}",
-                        operators, update_issues, offline_nodes, resume_nodes
-                    )
-                } else if !close_issues.is_empty() {
-                    format!(
-                        "{:?} Closing issues: {:?}, Resuming {:?}",
-                        operators,
-                        close_issues,
-                        resume_nodes,
-                    )
-                } else {
-                    format!("ctt Offlined nodes: {:?}", offline_nodes)
-                };
+                let msg = format!(
+                    "{:?} Opened: {:?}, Updated: {:?}, Closed: {:?}, Offlined: {:?}, Resumed: {:?}",
+                    operators,
+                    open_issues,
+                    update_issues,
+                    close_issues,
+                    offline_nodes,
+                    resume_nodes,
+                );
                 let post_chat_req = SlackApiChatPostMessageRequest::new(
                     format!("#{}", conf.slack.channel).into(),
                     SlackMessageContent::new().with_text(msg),
