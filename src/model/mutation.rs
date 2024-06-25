@@ -145,13 +145,18 @@ async fn issue_update(
             title: issue.title.clone(),
         })
         .await;
+
+    // needs to happen before node state check so that crate::sync::desired_state uses the new
+    // to_offline value for this issue
     updated_issue.updated_at = ActiveValue::Set(Utc::now().naive_utc());
     updated_issue.update(db).await.unwrap();
     //TODO FIXME how to handle a reduction in to_offline? (blade->card->node)
     //sync code doesn't know a node was offline due to being a sibling, so it will
     //open a new ticket for the sibling instead of resuming it
     //resuming nodes here for now instead of the sync loop since its easier
-    if let Some(t_o) = issue.to_offline {
+    if let Some(t_o) = issue.to_offline
+        && i.to_offline != issue.to_offline
+    {
         let cluster = ctx.data::<RegexCluster>().unwrap();
         let target = issue.target(ctx).await.unwrap().unwrap().name;
         let cousins = cluster.cousins(&target);
@@ -167,12 +172,15 @@ async fn issue_update(
                 let (desired_node_state, _) = crate::sync::desired_state(&c, db, cluster).await;
                 if desired_node_state == TargetStatus::Online {
                     //TODO add changelog msg
-                    cluster.release_node(&c).unwrap();
-                    let _ = tx
-                        .send(ChangeLogMsg::Resume {
-                            target: c.to_string(),
-                        })
-                        .await;
+                    if cluster.release_node(&c).is_err() {
+                        warn!("Error releasing node {}", c);
+                    } else {
+                        let _ = tx
+                            .send(ChangeLogMsg::Resume {
+                                target: c.to_string(),
+                            })
+                            .await;
+                    }
                 }
             }
         }
@@ -187,11 +195,15 @@ async fn issue_update(
                 if desired_node_state == TargetStatus::Online {
                     //TODO add changelog msg
                     cluster.release_node(&s).unwrap();
-                    let _ = tx
-                        .send(ChangeLogMsg::Resume {
-                            target: s.to_string(),
-                        })
-                        .await;
+                    if cluster.release_node(&s).is_err() {
+                        warn!("Error releasing node {}", s);
+                    } else {
+                        let _ = tx
+                            .send(ChangeLogMsg::Resume {
+                                target: s.to_string(),
+                            })
+                            .await;
+                    }
                 }
             }
         }
