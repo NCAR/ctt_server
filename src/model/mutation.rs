@@ -1,7 +1,7 @@
 use crate::auth::{Role, RoleChecker, RoleGuard};
 use crate::cluster::{ClusterTrait, RegexCluster};
 use crate::entities::comment;
-use crate::entities::issue::{self, IssueStatus};
+use crate::entities::issue::{self, IssueStatus, ToOffline};
 use crate::entities::prelude::*;
 use crate::entities::target::TargetStatus;
 use crate::ChangeLogMsg;
@@ -62,7 +62,7 @@ pub struct Mutation;
 
 #[instrument(skip(ctx))]
 async fn issue_update(
-    i: UpdateIssue,
+    mut i: UpdateIssue,
     operator: &str,
     ctx: &Context<'_>,
 ) -> Result<issue::Model, String> {
@@ -120,6 +120,9 @@ async fn issue_update(
             ..Default::default()
         };
         c.insert(db).await.unwrap();
+    }
+    if issue.to_offline.is_none() && i.to_offline.is_none() {
+        i.to_offline = Some(ToOffline::Node);
     }
     if let Some(_) = i.to_offline
         && i.to_offline != issue.to_offline
