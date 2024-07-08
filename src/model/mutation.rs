@@ -1,12 +1,15 @@
 use crate::auth::{Role, RoleChecker, RoleGuard};
 use crate::cluster::{ClusterTrait, RegexCluster};
+use crate::conf::Conf;
 use crate::entities::comment;
 use crate::entities::issue::{self, IssueStatus, ToOffline};
 use crate::entities::prelude::*;
 use crate::entities::target::TargetStatus;
 use crate::ChangeLogMsg;
+use crate::PbsScheduler;
 use async_graphql::{Context, InputObject, Object, Result};
 use chrono::Utc;
+use pbs::Server;
 use sea_orm::entity::ActiveValue;
 use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, QueryFilter};
@@ -67,6 +70,7 @@ async fn issue_update(
     ctx: &Context<'_>,
 ) -> Result<issue::Model, String> {
     let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
+    let conf = ctx.data::<Conf>().unwrap();
     let tx = &ctx.data_opt::<mpsc::Sender<ChangeLogMsg>>().unwrap();
     let issue = Issue::find_by_id(i.id).one(db).await.unwrap();
     if issue.is_none() {
@@ -161,7 +165,9 @@ async fn issue_update(
         && i.to_offline.is_some()
         && i.to_offline != issue.to_offline
     {
-        let cluster = ctx.data::<RegexCluster>().unwrap();
+        let mut cluster =
+            RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
+
         let target = issue.target(ctx).await.unwrap().unwrap().name;
         let cousins = cluster.cousins(&target);
         let siblings = cluster.siblings(&target);
@@ -173,7 +179,7 @@ async fn issue_update(
                 if c == target || siblings.contains(&c) {
                     continue;
                 }
-                let (desired_node_state, _) = crate::sync::desired_state(&c, db, cluster).await;
+                let (desired_node_state, _) = crate::sync::desired_state(&c, db, &cluster).await;
                 if desired_node_state == TargetStatus::Online {
                     //TODO add changelog msg
                     if cluster.release_node(&c).is_err() {
@@ -195,7 +201,7 @@ async fn issue_update(
                 if s == target {
                     continue;
                 }
-                let (desired_node_state, _) = crate::sync::desired_state(&s, db, cluster).await;
+                let (desired_node_state, _) = crate::sync::desired_state(&s, db, &cluster).await;
                 if desired_node_state == TargetStatus::Online {
                     //TODO add changelog msg
                     cluster.release_node(&s).unwrap();
@@ -357,9 +363,9 @@ impl Mutation {
         let usr = &ctx.data_opt::<RoleGuard>().unwrap().user;
         let tx = ctx.data_opt::<mpsc::Sender<ChangeLogMsg>>().unwrap();
         let db = ctx.data_opt::<Arc<DatabaseConnection>>().unwrap().as_ref();
-        let cluster = ctx.data::<RegexCluster>().unwrap();
-
-        issue_open(&issue, usr, db, tx, cluster).await
+        let conf = ctx.data::<Conf>().unwrap();
+        let cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
+        issue_open(&issue, usr, db, tx, &cluster).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     #[instrument(skip(ctx))]

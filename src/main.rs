@@ -20,7 +20,6 @@ use axum::{
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use cluster::scheduler::PbsScheduler;
-use cluster::RegexCluster;
 use http::StatusCode;
 use setup::setup_and_connect;
 use std::env;
@@ -79,10 +78,7 @@ async fn main() {
         .extension(Tracing)
         .data(db.clone())
         .data(tx.clone())
-        .data(RegexCluster::new(
-            conf.node_types.clone(),
-            PbsScheduler::new(pbs::Server::new()),
-        ))
+        .data(conf.clone())
         .finish();
 
     // get certificate and private key used by https

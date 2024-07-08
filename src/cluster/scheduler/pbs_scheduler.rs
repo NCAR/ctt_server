@@ -16,7 +16,7 @@ impl PbsScheduler {
         Self { srv }
     }
 
-    pub fn refresh_conn(&mut self) {
+    fn refresh_conn(&mut self) {
         self.srv = Server::new()
     }
 }
@@ -29,15 +29,23 @@ impl fmt::Debug for PbsScheduler {
 
 impl SchedulerTrait for PbsScheduler {
     #[instrument]
-    fn nodes_status(&self) -> Result<HashMap<String, (TargetStatus, String)>, String> {
+    fn nodes_status(&mut self) -> Result<HashMap<String, (TargetStatus, String)>, String> {
         //TODO filter stat attribs (just need hostname, jobs, and state)
         //TODO consider calling pbs_srv.stat_vnode from a spawn_blocking task
         //TODO add a timeout
         let mut resp = HashMap::new();
-        let vnode_stat = self.srv.stat_vnode(&None, None);
+        let mut vnode_stat = self.srv.stat_vnode(&None, None);
         if let Err(e) = vnode_stat {
-            warn!("error statting vnode: {}", e);
-            return Err(e);
+            info!(
+                "error statting vnode, refreshing conn and trying again: {}",
+                e
+            );
+            self.refresh_conn();
+            vnode_stat = self.srv.stat_vnode(&None, None);
+            if let Err(e) = vnode_stat {
+                warn!("error statting vnode: {}", e);
+                return Err(e);
+            }
         }
         for n in vnode_stat.unwrap().resources.iter() {
             let name = n.name();
@@ -102,19 +110,25 @@ impl SchedulerTrait for PbsScheduler {
     }
 
     #[instrument]
-    fn release_node(&self, target: &str) -> Result<(), ()> {
+    fn release_node(&mut self, target: &str) -> Result<(), ()> {
         info!("resuming node {}", target);
         if self.srv.clear_vnode(target, Some("")).is_err() {
-            return Err(());
+            self.refresh_conn();
+            if self.srv.clear_vnode(target, Some("")).is_err() {
+                return Err(());
+            }
         }
         Ok(())
     }
 
     #[instrument]
-    fn offline_node(&self, target: &str, comment: &str) -> Result<(), ()> {
+    fn offline_node(&mut self, target: &str, comment: &str) -> Result<(), ()> {
         info!("offlining: {}, {}", target, comment);
         if self.srv.offline_vnode(target, Some(comment)).is_err() {
-            return Err(());
+            self.refresh_conn();
+            if self.srv.offline_vnode(target, Some(comment)).is_err() {
+                return Err(());
+            }
         }
         Ok(())
     }

@@ -18,11 +18,6 @@ pub struct RegexCluster {
 
 impl RegexCluster {
     #[instrument]
-    pub fn refresh_conn(&mut self) {
-        self.sched.refresh_conn();
-    }
-
-    #[instrument]
     //TODO have sched be of type SchedulerTrait instead
     pub fn new(node_types: Vec<NodeType>, sched: PbsScheduler) -> Self {
         Self { sched, node_types }
@@ -103,15 +98,15 @@ impl ClusterTrait for RegexCluster {
     }
 
     #[instrument]
-    fn nodes_status(&self) -> Result<HashMap<String, (TargetStatus, String)>, String> {
+    fn nodes_status(&mut self) -> Result<HashMap<String, (TargetStatus, String)>, String> {
         self.sched.nodes_status()
     }
     #[instrument]
-    fn release_node(&self, target: &str) -> Result<(), ()> {
+    fn release_node(&mut self, target: &str) -> Result<(), ()> {
         self.sched.release_node(target)
     }
     #[instrument]
-    fn offline_node(&self, target: &str, comment: &str) -> Result<(), ()> {
+    fn offline_node(&mut self, target: &str, comment: &str) -> Result<(), ()> {
         self.sched.offline_node(target, comment)
     }
 }

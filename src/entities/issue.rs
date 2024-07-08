@@ -1,7 +1,10 @@
 use super::{comment, target};
 use crate::cluster::ClusterTrait;
 use crate::cluster::RegexCluster;
+use crate::conf::Conf;
+use crate::PbsScheduler;
 use async_graphql::*;
+use pbs::Server;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -49,7 +52,8 @@ impl Model {
     }
     pub async fn related(&self, ctx: &Context<'_>) -> Vec<target::Model> {
         let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
-        let cluster = ctx.data::<RegexCluster>().unwrap();
+        let conf = ctx.data::<Conf>().unwrap();
+        let cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
         let mut related: Vec<target::Model> = vec![];
         let tar = self.target(ctx).await;
         if let Err(e) = tar {
@@ -60,14 +64,14 @@ impl Model {
         match self.to_offline {
             Some(ToOffline::Card) => {
                 for t in cluster.siblings(&tar.name) {
-                    if let Some(tmp) = target::Entity::from_name(&t, db, cluster).await {
+                    if let Some(tmp) = target::Entity::from_name(&t, db, &cluster).await {
                         related.push(tmp);
                     }
                 }
             }
             Some(ToOffline::Blade) => {
                 for t in cluster.cousins(&tar.name) {
-                    if let Some(tmp) = target::Entity::from_name(&t, db, cluster).await {
+                    if let Some(tmp) = target::Entity::from_name(&t, db, &cluster).await {
                         related.push(tmp);
                     }
                 }

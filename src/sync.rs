@@ -32,14 +32,7 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
         // don't want multiple ctt threads messing with scheduler concurrently
         let db = db.as_ref();
         info!("performing sync with pbs");
-        let mut pbs_node_state = cluster.nodes_status();
-        if let Err(ref e) = pbs_node_state
-            && e == "Expired credential"
-        {
-            info!("refreshing conn, existing one has expired");
-            cluster.refresh_conn();
-            pbs_node_state = cluster.nodes_status();
-        }
+        let pbs_node_state = cluster.nodes_status();
         if let Err(e) = pbs_node_state {
             warn!("could not get node state from cluster: {}", e);
             continue;
@@ -61,8 +54,16 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
         // sync ctt and pbs
         for (target, old_state) in &ctt_node_state {
             if let Some((new_state, pbs_comment)) = pbs_node_state.get(target) {
-                handle_transition(target, pbs_comment, old_state, new_state, db, &tx, &cluster)
-                    .await;
+                handle_transition(
+                    target,
+                    pbs_comment,
+                    old_state,
+                    new_state,
+                    db,
+                    &tx,
+                    &mut cluster,
+                )
+                .await;
             } else {
                 warn!("{} not found in pbs", target);
                 if let Some(new_issue) = crate::model::NewIssue::new(
@@ -313,7 +314,7 @@ async fn handle_transition(
     new_state: &TargetStatus,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<ChangeLogMsg>,
-    cluster: &RegexCluster,
+    cluster: &mut RegexCluster,
 ) {
     let (expected_state, comment) = desired_state(target, db, cluster).await;
 
