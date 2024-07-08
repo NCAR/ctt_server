@@ -849,7 +849,7 @@ dependencies = [
 
 [[package]]
 name = "cttd"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "async-graphql",
  "async-graphql-axum",
