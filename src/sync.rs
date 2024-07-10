@@ -217,7 +217,7 @@ pub async fn desired_state(
                 .await
                 .unwrap()
             {
-                debug!("Offline due to node ticket");
+                trace!("Offline due to node ticket");
                 return (TargetStatus::Offline, iss.title);
             }
             t
@@ -238,7 +238,7 @@ pub async fn desired_state(
                     .unwrap()
                     .is_some()
                 {
-                    debug!("Offline due to card wide ticket");
+                    trace!("Offline due to card wide ticket");
                     return (TargetStatus::Offline, format!("{} sibling", &target));
                 }
             }
@@ -259,7 +259,7 @@ pub async fn desired_state(
                     .unwrap()
                     .is_some()
                 {
-                    debug!("Offline due to blade wide ticket");
+                    trace!("Offline due to blade wide ticket");
                     return (TargetStatus::Offline, format!("{} sibling", &target));
                 }
             }
@@ -273,7 +273,7 @@ pub async fn desired_state(
         .await
         .unwrap()
     {
-        debug!("Down due to node ticket");
+        trace!("Down due to node ticket");
         return (TargetStatus::Down, iss.title);
     }
     trace!("Online due to no related tickets");

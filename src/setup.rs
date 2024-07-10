@@ -1,13 +1,18 @@
 use crate::migrator::Migrator;
 use sea_orm::*;
 use sea_orm_migration::{MigratorTrait, SchemaManager};
-use std::fs::File;
+use std::{fs::File, time::Duration};
 
 pub async fn setup_and_connect(db_url: &str) -> Result<DatabaseConnection, DbErr> {
     let _ = File::open(db_url).unwrap_or_else(|_| File::create(db_url).unwrap());
-    let db = Database::connect(format!("sqlite://{}", db_url))
-        .await
-        .unwrap();
+    let mut opt: ConnectOptions = ConnectOptions::new(format!("sqlite://{}", db_url));
+    opt.max_connections(100)
+        .min_connections(0)
+        .connect_timeout(Duration::from_secs(100))
+        .idle_timeout(Duration::from_secs(1))
+        .acquire_timeout(Duration::from_secs(1))
+        .max_lifetime(Duration::from_secs(120));
+    let db = Database::connect(opt).await.unwrap();
 
     let schema_manager = SchemaManager::new(&db);
 
