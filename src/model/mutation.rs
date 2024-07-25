@@ -9,7 +9,6 @@ use crate::ChangeLogMsg;
 use crate::PbsScheduler;
 use async_graphql::{Context, InputObject, Object, Result};
 use chrono::Utc;
-use pbs::Server;
 use sea_orm::entity::ActiveValue;
 use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, QueryFilter};
@@ -165,8 +164,7 @@ async fn issue_update(
         && i.to_offline.is_some()
         && i.to_offline != issue.to_offline
     {
-        let mut cluster =
-            RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
+        let mut cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new());
 
         let target = issue.target(ctx).await.unwrap().unwrap().name;
         let cousins = cluster.cousins(&target);
@@ -364,7 +362,7 @@ impl Mutation {
         let tx = ctx.data_opt::<mpsc::Sender<ChangeLogMsg>>().unwrap();
         let db = ctx.data_opt::<Arc<DatabaseConnection>>().unwrap().as_ref();
         let conf = ctx.data::<Conf>().unwrap();
-        let cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
+        let cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new());
         issue_open(&issue, usr, db, tx, &cluster).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]

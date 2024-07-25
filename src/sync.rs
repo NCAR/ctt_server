@@ -8,7 +8,6 @@ use crate::entities::issue::ToOffline;
 use crate::entities::target::TargetStatus;
 use crate::model::mutation;
 use crate::ChangeLogMsg;
-use pbs::Server;
 use sea_orm::prelude::Expr;
 use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, QuerySelect};
@@ -24,7 +23,7 @@ use tracing::{debug, info, instrument, trace, warn};
 #[instrument(skip(db, conf))]
 pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sender<ChangeLogMsg>) {
     let mut interval = time::interval(Duration::from_secs(conf.poll_interval));
-    let mut cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new(Server::new()));
+    let mut cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new());
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {

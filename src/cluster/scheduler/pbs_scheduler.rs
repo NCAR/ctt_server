@@ -7,17 +7,11 @@ use tracing::{info, warn};
 
 use super::SchedulerTrait;
 
-pub struct PbsScheduler {
-    srv: Server,
-}
+pub struct PbsScheduler {}
 
 impl PbsScheduler {
-    pub fn new(srv: Server) -> Self {
-        Self { srv }
-    }
-
-    fn refresh_conn(&mut self) {
-        self.srv = Server::new()
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -27,25 +21,24 @@ impl fmt::Debug for PbsScheduler {
     }
 }
 
+impl Default for PbsScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SchedulerTrait for PbsScheduler {
     #[instrument]
     fn nodes_status(&mut self) -> Result<HashMap<String, (TargetStatus, String)>, String> {
         //TODO filter stat attribs (just need hostname, jobs, and state)
         //TODO consider calling pbs_srv.stat_vnode from a spawn_blocking task
         //TODO add a timeout
+        let srv = Server::new();
         let mut resp = HashMap::new();
-        let mut vnode_stat = self.srv.stat_vnode(&None, None);
+        let vnode_stat = srv.stat_vnode(&None, None);
         if let Err(e) = vnode_stat {
-            info!(
-                "error statting vnode, refreshing conn and trying again: {}",
-                e
-            );
-            self.refresh_conn();
-            vnode_stat = self.srv.stat_vnode(&None, None);
-            if let Err(e) = vnode_stat {
-                warn!("error statting vnode: {}", e);
-                return Err(e);
-            }
+            warn!("error statting vnode: {}", e);
+            return Err(e);
         }
         for n in vnode_stat.unwrap().resources.iter() {
             let name = n.name();
@@ -94,9 +87,9 @@ impl SchedulerTrait for PbsScheduler {
                 x => {
                     warn!("unrecognized node state, '{}'", x);
                     //TODO should we really offline nodes randomly while checking node status?
-                    if let Err(e) = self.srv.offline_vnode(&name, None) {
-                        warn!("Error offlining node {}: {}", name, e);
-                    }
+                    //if let Err(e) = srv.offline_vnode(&name, None) {
+                    //    warn!("Error offlining node {}: {}", name, e);
+                    //}
                     if jobs {
                         TargetStatus::Draining
                     } else {
@@ -112,11 +105,9 @@ impl SchedulerTrait for PbsScheduler {
     #[instrument]
     fn release_node(&mut self, target: &str) -> Result<(), ()> {
         info!("resuming node {}", target);
-        if self.srv.clear_vnode(target, Some("")).is_err() {
-            self.refresh_conn();
-            if self.srv.clear_vnode(target, Some("")).is_err() {
-                return Err(());
-            }
+        let srv = Server::new();
+        if srv.clear_vnode(target, Some("")).is_err() {
+            return Err(());
         }
         Ok(())
     }
@@ -124,11 +115,9 @@ impl SchedulerTrait for PbsScheduler {
     #[instrument]
     fn offline_node(&mut self, target: &str, comment: &str) -> Result<(), ()> {
         info!("offlining: {}, {}", target, comment);
-        if self.srv.offline_vnode(target, Some(comment)).is_err() {
-            self.refresh_conn();
-            if self.srv.offline_vnode(target, Some(comment)).is_err() {
-                return Err(());
-            }
+        let srv = Server::new();
+        if srv.offline_vnode(target, Some(comment)).is_err() {
+            return Err(());
         }
         Ok(())
     }
