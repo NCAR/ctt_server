@@ -9,8 +9,8 @@ pub async fn setup_and_connect(db_url: &str) -> Result<DatabaseConnection, DbErr
     opt.max_connections(100)
         .min_connections(0)
         .connect_timeout(Duration::from_secs(100))
-        .idle_timeout(Duration::from_secs(1))
-        .acquire_timeout(Duration::from_secs(1))
+        .idle_timeout(Duration::from_secs(10))
+        .acquire_timeout(Duration::from_secs(10))
         .max_lifetime(Duration::from_secs(120));
     let db = Database::connect(opt).await.unwrap();
 
