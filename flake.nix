@@ -18,12 +18,21 @@
       {
         devShells.default = with pkgs; mkShell {
           buildInputs = [
-            linux-pam # for pam headers
-            #openssl
-            #pkg-config
-            (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
+            openssl
+            pkg-config
+	    (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
+              extensions = [
+                "rust-src"
+                "rust-analyzer"
+		"miri"
+		"clippy"
+		"rustfmt"
+              ];
+            }))
           ];
-          shellHook = "exec fish";
+          shellHook = ''
+	    fish
+          '';
         };
       }
     );
