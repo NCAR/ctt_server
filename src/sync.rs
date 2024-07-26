@@ -31,6 +31,18 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
         // don't want multiple ctt threads messing with scheduler concurrently
         let db = db.as_ref();
         info!("performing sync with pbs");
+
+        let to_open = entities::issue::Entity::find()
+            .filter(entities::issue::Column::Status.eq(IssueStatus::Opening))
+            .all(db)
+            .await
+            .unwrap();
+        let to_close = entities::issue::Entity::find()
+            .filter(entities::issue::Column::Status.eq(IssueStatus::Closing))
+            .all(db)
+            .await
+            .unwrap();
+
         let pbs_node_state = cluster.nodes_status();
         if let Err(e) = pbs_node_state {
             warn!("could not get node state from cluster: {}", e);
@@ -79,24 +91,17 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
                 }
             }
         }
-        entities::issue::Entity::update_many()
-            .col_expr(
-                entities::issue::Column::Status,
-                Expr::value(IssueStatus::Open),
-            )
-            .filter(entities::issue::Column::Status.eq(IssueStatus::Opening))
-            .exec(db)
-            .await
-            .unwrap();
-        entities::issue::Entity::update_many()
-            .col_expr(
-                entities::issue::Column::Status,
-                Expr::value(IssueStatus::Closed),
-            )
-            .filter(entities::issue::Column::Status.eq(IssueStatus::Closing))
-            .exec(db)
-            .await
-            .unwrap();
+
+        for iss in to_open {
+            let mut i: entities::issue::ActiveModel = iss.into();
+            i.status = sea_orm::ActiveValue::Set(IssueStatus::Open);
+            i.update(db).await.unwrap();
+        }
+        for iss in to_close {
+            let mut i: entities::issue::ActiveModel = iss.into();
+            i.status = sea_orm::ActiveValue::Set(IssueStatus::Closed);
+            i.update(db).await.unwrap();
+        }
         info!("pbs sync complete");
     }
 }
