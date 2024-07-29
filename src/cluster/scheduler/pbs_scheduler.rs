@@ -86,10 +86,6 @@ impl SchedulerTrait for PbsScheduler {
                 "free" => TargetStatus::Online,
                 x => {
                     warn!("unrecognized node state, '{}'", x);
-                    //TODO should we really offline nodes randomly while checking node status?
-                    //if let Err(e) = srv.offline_vnode(&name, None) {
-                    //    warn!("Error offlining node {}: {}", name, e);
-                    //}
                     if jobs {
                         TargetStatus::Draining
                     } else {
