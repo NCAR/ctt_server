@@ -69,11 +69,13 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
             .all(db)
             .await
             .unwrap();
+        trace!("found to open");
         let to_close = entities::issue::Entity::find()
             .filter(entities::issue::Column::Status.eq(IssueStatus::Closing))
             .all(db)
             .await
             .unwrap();
+        trace!("found to close");
 
         let pbs_node_state = cluster.nodes_status();
         // TODO: Come up with expected state for all nodes instead of doing it for each node to
@@ -86,8 +88,11 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
             continue;
         }
         let pbs_node_state = pbs_node_state.unwrap();
+        trace!("got pbs node states");
         let mut ctt_node_state = get_ctt_nodes(db).await;
+        trace!("got ctt node states");
         let desired_state = get_expected_state(db, &cluster).await;
+        trace!("calculated desired node states");
 
         //add any pbs nodes not in ctt into ctt for tracking
         pbs_node_state
@@ -99,6 +104,7 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
             .for_each(|t| {
                 ctt_node_state.insert(t.to_string(), TargetStatus::Online);
             });
+        trace!("added missing nodes to ctt");
 
         // sync ctt and pbs
         for (target, old_state) in &ctt_node_state {
@@ -130,6 +136,7 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
                 }
             }
         }
+        trace!("handled node transitions");
 
         for iss in to_open {
             let mut i: entities::issue::ActiveModel = iss.into();
