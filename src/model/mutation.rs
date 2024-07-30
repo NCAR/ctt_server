@@ -166,7 +166,7 @@ async fn issue_update(
     {
         let mut cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new());
 
-        let target = issue.target(ctx).await.unwrap().unwrap().name;
+        let target = issue.get_target(db).await.unwrap().name;
         let cousins = cluster.cousins(&target);
         let siblings = cluster.siblings(&target);
 
@@ -323,7 +323,7 @@ async fn issue_close(
 ) -> Result<String, String> {
     let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
     let issue = Issue::find_by_id(cttissue).one(db).await.unwrap().unwrap();
-    let target = issue.target(ctx).await.unwrap().unwrap();
+    let target = issue.get_target(db).await.unwrap();
     if issue.status == IssueStatus::Open || issue.status == IssueStatus::Opening {
         info!(
             "Closing ticket {} for {}: {}",
