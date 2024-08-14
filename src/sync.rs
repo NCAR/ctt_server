@@ -289,9 +289,11 @@ async fn handle_transition(
             } else if !related_closing(target, db, cluster).await.is_empty() {
                 info!("resuming {}, all open issues are Closing", target);
                 cluster.release_node(target).unwrap();
+
                 let _ = tx
                     .send(ChangeLogMsg::Resume {
                         target: target.to_string(),
+                        operator: "ctt".to_string(),
                     })
                     .await;
                 TargetStatus::Online
@@ -324,6 +326,7 @@ async fn handle_transition(
                 let _ = tx
                     .send(ChangeLogMsg::Offline {
                         target: target.to_string(),
+                        operator: "ctt".to_string(),
                     })
                     .await;
                 if *state == TargetStatus::Down {

@@ -28,9 +28,11 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<String>, _conf: Conf) {
 pub enum ChangeLogMsg {
     Offline {
         target: String,
+        operator: String,
     },
     Resume {
         target: String,
+        operator: String,
     },
     Close {
         issue: i32,
@@ -73,11 +75,15 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
         tokio::select! {
             Some(u) = rx.recv() => {
                 match u {
-                    ChangeLogMsg::Offline { target: t } => {
+                    ChangeLogMsg::Offline { target: t, operator: o } => {
                         offline_nodes.insert(t);
+                        operators.insert(o);
                     }
-                    ChangeLogMsg::Resume { target: t } => {
-                        resume_nodes.insert(t);
+                    ChangeLogMsg::Resume { target: t, operator: o } => {
+                        if o != "ctt" {
+                            resume_nodes.insert(t);
+                            operators.insert(o);
+                        }
                     }
                     ChangeLogMsg::Close {
                         issue: i,
@@ -86,14 +92,14 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                         operator: o,
                     } => {
                         if o != "ctt" {
-                        if let Some(key) = close_issues.get_mut(&t) {
-                            key.insert(i);
-                        } else {
-                            let mut tmp = HashSet::new();
-                            tmp.insert(i);
-                            close_issues.insert(t, tmp);
-                        }
-                        operators.insert(o);
+                            if let Some(key) = close_issues.get_mut(&t) {
+                                key.insert(i);
+                            } else {
+                                let mut tmp = HashSet::new();
+                                tmp.insert(i);
+                                close_issues.insert(t, tmp);
+                            }
+                            operators.insert(o);
                         }
                     }
                     ChangeLogMsg::Open {
@@ -102,8 +108,8 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                         operator: o,
                     } => {
                         if o != "ctt" {
-                        open_issues.insert(i);
-                        operators.insert(o);
+                            open_issues.insert(i);
+                            operators.insert(o);
                         }
                     }
                     ChangeLogMsg::Update {
@@ -126,21 +132,29 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
 
                 // don't care if its ctt doing anything besides offlining nodes (no operators and no
                 // offline_nodes or if no nodes state is being changed (no resume_nodes or offline_nodes)
-                if (operators.is_empty() || resume_nodes.is_empty()) && offline_nodes.is_empty() {
+                if operators.is_empty() || (operators.len() == 1 && operators.contains("ctt") && offline_nodes.is_empty()) {
                     continue;
                 }
 
                 let session = client.open_session(&token);
 
-                let msg = format!(
-                    "{:?} Opened: {:?}, Updated: {:?}, Closed: {:?}, Offlined: {:?}, Resumed: {:?}",
-                    operators,
-                    open_issues,
-                    update_issues,
-                    close_issues,
-                    offline_nodes,
-                    resume_nodes,
-                );
+                let mut msg  = format!("{:?}", operators);
+                if !open_issues.is_empty() {
+                    msg.push_str(&format!("\nOpened: {:?}", open_issues));
+                }
+                if !update_issues.is_empty() {
+                    msg.push_str(&format!("\nUpdated: {:?}", update_issues));
+                }
+                if !close_issues.is_empty() {
+                    msg.push_str(&format!("\nClosed: {:?}", close_issues));
+                }
+                if !offline_nodes.is_empty() {
+                    msg.push_str(&format!("\nOfflined: {:?}", offline_nodes));
+                }
+                if !resume_nodes.is_empty() {
+                    msg.push_str(&format!("\nResumed: {:?}", resume_nodes));
+                }
+
                 let post_chat_req = SlackApiChatPostMessageRequest::new(
                     format!("#{}", conf.slack.channel).into(),
                     SlackMessageContent::new().with_text(msg),

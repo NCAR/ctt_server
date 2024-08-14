@@ -186,6 +186,7 @@ async fn issue_update(
                         let _ = tx
                             .send(ChangeLogMsg::Resume {
                                 target: c.to_string(),
+                                operator: operator.to_string(),
                             })
                             .await;
                     }
@@ -209,6 +210,7 @@ async fn issue_update(
                         let _ = tx
                             .send(ChangeLogMsg::Resume {
                                 target: s.to_string(),
+                                operator: operator.to_string(),
                             })
                             .await;
                     }
