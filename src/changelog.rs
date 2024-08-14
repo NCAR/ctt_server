@@ -55,7 +55,7 @@ pub enum ChangeLogMsg {
 #[cfg(feature = "slack")]
 #[instrument(skip(conf))]
 pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
-    let mut interval = time::interval(Duration::from_secs(conf.poll_interval));
+    let mut interval = time::interval(Duration::from_secs(conf.poll_interval * 6));
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     use std::collections::{HashMap, HashSet};
 
@@ -80,10 +80,8 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                         operators.insert(o);
                     }
                     ChangeLogMsg::Resume { target: t, operator: o } => {
-                        if o != "ctt" {
-                            resume_nodes.insert(t);
-                            operators.insert(o);
-                        }
+                        resume_nodes.insert(t);
+                        operators.insert(o);
                     }
                     ChangeLogMsg::Close {
                         issue: i,
@@ -132,7 +130,7 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
 
                 // don't care if its ctt doing anything besides offlining nodes (no operators and no
                 // offline_nodes or if no nodes state is being changed (no resume_nodes or offline_nodes)
-                if operators.is_empty() || (operators.len() == 1 && operators.contains("ctt") && offline_nodes.is_empty()) {
+                if operators.is_empty() {
                     continue;
                 }
 
