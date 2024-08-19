@@ -4,6 +4,8 @@ use slack_morphism::{
     prelude::SlackApiChatPostMessageRequest, prelude::SlackClientHyperConnector, SlackApiToken,
     SlackApiTokenValue, SlackClient, SlackMessageContent,
 };
+#[cfg(feature = "slack")]
+use std::collections::{BTreeMap, BTreeSet};
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 #[allow(unused_imports)]
@@ -57,19 +59,18 @@ pub enum ChangeLogMsg {
 pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
     let mut interval = time::interval(Duration::from_secs(conf.poll_interval * 6));
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
-    use std::collections::{HashMap, HashSet};
 
     let connector = SlackClientHyperConnector::new().unwrap();
     let client = SlackClient::new(connector);
     let token_value: SlackApiTokenValue = conf.slack.token.into();
     let token: SlackApiToken = SlackApiToken::new(token_value);
     //title: issues
-    let mut close_issues: HashMap<String, HashSet<i32>> = HashMap::new();
-    let mut update_issues: HashMap<String, HashSet<i32>> = HashMap::new();
-    let mut open_issues: HashSet<i32> = HashSet::new();
-    let mut operators: HashSet<String> = HashSet::new();
-    let mut offline_nodes: HashSet<String> = HashSet::new();
-    let mut resume_nodes: HashSet<String> = HashSet::new();
+    let mut close_issues: BTreeMap<String, BTreeSet<i32>> = BTreeMap::new();
+    let mut update_issues: BTreeMap<String, BTreeSet<i32>> = BTreeMap::new();
+    let mut open_issues: BTreeSet<i32> = BTreeSet::new();
+    let mut operators: BTreeSet<String> = BTreeSet::new();
+    let mut offline_nodes: BTreeSet<String> = BTreeSet::new();
+    let mut resume_nodes: BTreeSet<String> = BTreeSet::new();
 
     loop {
         tokio::select! {
@@ -93,7 +94,7 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                             if let Some(key) = close_issues.get_mut(&t) {
                                 key.insert(i);
                             } else {
-                                let mut tmp = HashSet::new();
+                                let mut tmp = BTreeSet::new();
                                 tmp.insert(i);
                                 close_issues.insert(t, tmp);
                             }
@@ -118,7 +119,7 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                         if let Some(key) = update_issues.get_mut(&t) {
                             key.insert(i);
                         } else {
-                            let mut tmp = HashSet::new();
+                            let mut tmp = BTreeSet::new();
                             tmp.insert(i);
                             update_issues.insert(t, tmp);
                         }
@@ -161,12 +162,12 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                 if let Err(e) = session.chat_post_message(&post_chat_req).await {
                     warn!("error sending slack message {}", e);
                 };
-                close_issues = HashMap::new();
-                update_issues = HashMap::new();
-                open_issues = HashSet::new();
-                operators = HashSet::new();
-                offline_nodes = HashSet::new();
-                resume_nodes = HashSet::new();
+                close_issues = BTreeMap::new();
+                update_issues = BTreeMap::new();
+                open_issues = BTreeSet::new();
+                operators = BTreeSet::new();
+                offline_nodes = BTreeSet::new();
+                resume_nodes = BTreeSet::new();
             }
         }
     }
