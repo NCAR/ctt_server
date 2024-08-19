@@ -1,6 +1,6 @@
 [package]
 name = "cttd"
-version = "0.3.9"
+version = "0.3.10"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Graphql api for CTT"
@@ -11,7 +11,7 @@ async-graphql = { version = "7", features = ["tracing", "chrono"] }
 async-graphql-axum =  "7"
 async-trait = "0.1"
 axum = "0.7"
-axum-server = { version = "0.6", features = ["tls-rustls"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
 chrono = {version = "0.4", features = ["serde"] }
 config = "0.14"
 futures-util = "0.3"
@@ -22,13 +22,13 @@ lazy_static = "1"
 munge_auth = "0.1.1"
 pbs = "0.0.6"
 rand = "0.8"
-sea-orm = { version="0.12", features = ["with-chrono", "sqlx-sqlite", "runtime-tokio-rustls", "macros"]}
-sea-orm-migration = "0.12"
+sea-orm = { version="1", features = ["with-chrono", "sqlx-sqlite", "runtime-tokio-rustls", "macros"]}
+sea-orm-migration = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 slack-morphism = { version = "2", features = ["axum"], optional = true}
 tokio = {version = "1", features = ["full"] }
-tower = { version = "0.4", features = ["timeout"] }
+tower = { version = "0.5", features = ["timeout"] }
 tower-http = { version = "0.5", features = ["trace", "auth", "validate-request"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json"] }
