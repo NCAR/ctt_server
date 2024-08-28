@@ -1,23 +1,18 @@
 use crate::entities::target::TargetStatus;
-use core::fmt;
 use pbs::{Attrl, Op, Server};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::instrument;
 use tracing::{info, warn};
 
-use super::SchedulerTrait;
+use super::SchedulerInnerTrait;
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct PbsScheduler {}
 
 impl PbsScheduler {
     pub fn new() -> Self {
         Self {}
-    }
-}
-
-impl fmt::Debug for PbsScheduler {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PbsScheduler").finish()
     }
 }
 
@@ -27,7 +22,7 @@ impl Default for PbsScheduler {
     }
 }
 
-impl SchedulerTrait for PbsScheduler {
+impl SchedulerInnerTrait for PbsScheduler {
     #[instrument]
     fn nodes_status(&mut self) -> Result<HashMap<String, (TargetStatus, String)>, String> {
         //TODO filter stat attribs (just need hostname, jobs, and state)
@@ -99,21 +94,21 @@ impl SchedulerTrait for PbsScheduler {
     }
 
     #[instrument]
-    fn release_node(&mut self, target: &str) -> Result<(), ()> {
+    fn release_node(&mut self, target: &str) -> Result<(), String> {
         info!("resuming node {}", target);
         let srv = Server::new();
-        if srv.clear_vnode(target, Some("")).is_err() {
-            return Err(());
+        if let Err(e) = srv.clear_vnode(target, Some("")) {
+            return Err(e.to_string());
         }
         Ok(())
     }
 
     #[instrument]
-    fn offline_node(&mut self, target: &str, comment: &str) -> Result<(), ()> {
+    fn offline_node(&mut self, target: &str, comment: &str) -> Result<(), String> {
         info!("offlining: {}, {}", target, comment);
         let srv = Server::new();
-        if srv.offline_vnode(target, Some(comment)).is_err() {
-            return Err(());
+        if let Err(e) = srv.offline_vnode(target, Some(comment)) {
+            return Err(e.to_string());
         }
         Ok(())
     }

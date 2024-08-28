@@ -1,17 +1,17 @@
 use crate::auth::{Role, RoleChecker, RoleGuard};
-use crate::cluster::{ClusterTrait, RegexCluster};
+use crate::cluster::{self, ClusterTrait};
 use crate::conf::Conf;
 use crate::entities::comment;
 use crate::entities::issue::{self, IssueStatus, ToOffline};
 use crate::entities::prelude::*;
 use crate::entities::target::TargetStatus;
 use crate::ChangeLogMsg;
-use crate::PbsScheduler;
 use async_graphql::{Context, InputObject, Object, Result};
 use chrono::Utc;
 use sea_orm::entity::ActiveValue;
 use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, QueryFilter};
+use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, instrument, warn};
@@ -43,7 +43,7 @@ impl NewIssue {
         title: String,
         target: String,
         to_offline: Option<issue::ToOffline>,
-        cluster: &RegexCluster,
+        cluster: &Box<dyn ClusterTrait>,
     ) -> Option<Self> {
         if cluster.real_node(&target) {
             Some(Self {
@@ -164,7 +164,7 @@ async fn issue_update(
         && i.to_offline.is_some()
         && i.to_offline != issue.to_offline
     {
-        let mut cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new());
+        let mut cluster = cluster::new(conf.cluster.clone(), conf.scheduler.clone());
 
         let target = issue.get_target(db).await.unwrap().name;
         let cousins = cluster.cousins(&target);
@@ -225,7 +225,7 @@ async fn issue_update(
 fn node_group(
     target: &str,
     group: Option<issue::ToOffline>,
-    cluster: &RegexCluster,
+    cluster: &Box<dyn ClusterTrait>,
 ) -> Vec<String> {
     match group {
         None => vec![],
@@ -242,7 +242,7 @@ fn to_offline(
     target: &str,
     status: pbs::StatResp,
     group: Option<issue::ToOffline>,
-    cluster: &RegexCluster,
+    cluster: &Box<dyn ClusterTrait>,
 ) -> Vec<String> {
     let to_offline = node_group(target, group, cluster);
     status
@@ -265,7 +265,7 @@ pub async fn issue_open(
     operator: &str,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<ChangeLogMsg>,
-    cluster: &RegexCluster,
+    cluster: &Box<dyn ClusterTrait>,
 ) -> Result<issue::Model, String> {
     if !cluster.real_node(&i.target) {
         return Err(format!("{} is not a real node", &i.target));
@@ -364,7 +364,7 @@ impl Mutation {
         let tx = ctx.data_opt::<mpsc::Sender<ChangeLogMsg>>().unwrap();
         let db = ctx.data_opt::<Arc<DatabaseConnection>>().unwrap().as_ref();
         let conf = ctx.data::<Conf>().unwrap();
-        let cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new());
+        let cluster = cluster::new(conf.cluster.clone(), conf.scheduler.clone());
         issue_open(&issue, usr, db, tx, &cluster).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]

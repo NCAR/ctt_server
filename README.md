@@ -1,15 +1,10 @@
 # ctt server
 GraphQL api server for CTT
 
-## Features
-- `pbs`, `slack`, and `auth` are all default features
-- `pbs` enables interaction with the pbs job scheduler
-- `slack` enables sending slack messages on certain events
-- `auth` enables authentication, using posix groups on the server node
-  - currently the only flow uses munge, however other flows planned (eventually...)
-### Systems
-- one of these is required
-- `gust` used to compile for the gust system
+## Notes
+- uses [cargo-generate-rpm](https://crates.io/crates/cargo-generate-rpm) to build rpms
+- currently the only auth flow uses munge, however other flows planned (eventually...)
+- currently only has one cluster and scheduler type, but more are planned (eventually...)
 
 ## Dev setup
 - generate a cert with `openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 3650 -nodes -subj "/C=XX/ST=StateName/L=CityName/O=CompanyName/OU=CompanySectionName/CN=127.0.0.1"`

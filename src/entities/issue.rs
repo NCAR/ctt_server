@@ -1,8 +1,6 @@
 use super::{comment, target};
-use crate::cluster::ClusterTrait;
-use crate::cluster::RegexCluster;
+use crate::cluster::{self, ClusterTrait};
 use crate::Conf;
-use crate::PbsScheduler;
 use async_graphql::*;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -46,7 +44,7 @@ impl Model {
     pub async fn related(&self, ctx: &Context<'_>) -> Vec<target::Model> {
         let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
         let conf = ctx.data::<Conf>().unwrap();
-        let cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new());
+        let cluster = cluster::new(conf.cluster.clone(), conf.scheduler.clone());
         self.get_related(db, &cluster).await
     }
 }
@@ -63,7 +61,7 @@ impl Model {
     pub async fn get_related(
         &self,
         db: &DatabaseConnection,
-        cluster: &RegexCluster,
+        cluster: &Box<dyn ClusterTrait>,
     ) -> Vec<target::Model> {
         let mut related: Vec<target::Model> = vec![];
         let tar = self.get_target(db).await;

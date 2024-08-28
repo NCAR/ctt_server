@@ -19,7 +19,6 @@ use axum::{
 };
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
-use cluster::scheduler::PbsScheduler;
 use http::StatusCode;
 use setup::setup_and_connect;
 use std::env;

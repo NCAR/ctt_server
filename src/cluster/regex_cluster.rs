@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
-use super::scheduler::{PbsScheduler, SchedulerTrait};
-use crate::cluster::ClusterTrait;
+use super::scheduler::SchedulerTrait;
+use crate::cluster::ClusterInnerTrait;
 use crate::conf::NodeType;
 use crate::entities::target::TargetStatus;
 use regex::Regex;
@@ -13,14 +13,14 @@ use tracing::warn;
 pub struct RegexCluster {
     node_types: Vec<NodeType>,
     //TODO have sched be of type SchedulerTrait instead
-    sched: PbsScheduler,
+    sched: Box<dyn SchedulerTrait + Send + Sync>,
 }
 
 impl RegexCluster {
     #[instrument]
     //TODO have sched be of type SchedulerTrait instead
-    pub fn new(node_types: Vec<NodeType>, sched: PbsScheduler) -> Self {
-        Self { sched, node_types }
+    pub fn new(node_types: Vec<NodeType>, sched: Box<dyn SchedulerTrait + Send + Sync>) -> Self {
+        Self { node_types, sched }
     }
 
     #[instrument]
@@ -69,7 +69,7 @@ impl RegexCluster {
     }
 }
 
-impl ClusterTrait for RegexCluster {
+impl ClusterInnerTrait for RegexCluster {
     #[instrument]
     fn siblings(&self, target: &str) -> Vec<String> {
         if let Some(nodetype) = self.get_node_type(target) {
@@ -102,11 +102,11 @@ impl ClusterTrait for RegexCluster {
         self.sched.nodes_status()
     }
     #[instrument]
-    fn release_node(&mut self, target: &str) -> Result<(), ()> {
+    fn release_node(&mut self, target: &str) -> Result<(), String> {
         self.sched.release_node(target)
     }
     #[instrument]
-    fn offline_node(&mut self, target: &str, comment: &str) -> Result<(), ()> {
+    fn offline_node(&mut self, target: &str, comment: &str) -> Result<(), String> {
         self.sched.offline_node(target, comment)
     }
 }

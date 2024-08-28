@@ -1,6 +1,4 @@
-use crate::cluster::scheduler::PbsScheduler;
-use crate::cluster::ClusterTrait;
-use crate::cluster::RegexCluster;
+use crate::cluster::{self, ClusterTrait};
 use crate::conf::Conf;
 use crate::entities;
 use crate::entities::issue::IssueStatus;
@@ -23,7 +21,7 @@ use tracing::{debug, info, instrument, trace, warn};
 
 async fn get_expected_state(
     db: &DatabaseConnection,
-    cluster: &RegexCluster,
+    cluster: &Box<dyn ClusterTrait>,
 ) -> HashMap<String, TargetStatus> {
     let mut des_state = HashMap::new();
 
@@ -55,7 +53,7 @@ async fn get_expected_state(
 #[instrument(skip(db, conf))]
 pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sender<ChangeLogMsg>) {
     let mut interval = time::interval(Duration::from_secs(conf.poll_interval));
-    let mut cluster = RegexCluster::new(conf.node_types.clone(), PbsScheduler::new());
+    let mut cluster = cluster::new(conf.cluster.clone(), conf.scheduler.clone());
     // don't let ticks stack up if a sync takes longer than interval
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
     loop {
@@ -166,7 +164,7 @@ pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetSta
 pub async fn related_closing(
     target: &str,
     db: &DatabaseConnection,
-    cluster: &RegexCluster,
+    cluster: &Box<dyn ClusterTrait>,
 ) -> Vec<entities::issue::Model> {
     let mut issues = Vec::new();
     let t = entities::target::Entity::from_name(target, db, cluster).await;
@@ -240,7 +238,11 @@ pub async fn related_closing(
 }
 
 #[instrument(skip(db))]
-pub async fn close_open_issues(target: &str, db: &DatabaseConnection, cluster: &RegexCluster) {
+pub async fn close_open_issues(
+    target: &str,
+    db: &DatabaseConnection,
+    cluster: &Box<dyn ClusterTrait>,
+) {
     for issue in entities::target::Entity::from_name(target, db, cluster)
         .await
         .unwrap()
@@ -274,7 +276,7 @@ async fn handle_transition(
     new_state: &TargetStatus,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<ChangeLogMsg>,
-    cluster: &mut RegexCluster,
+    cluster: &mut Box<dyn ClusterTrait>,
 ) {
     //let (expected_state, comment) = desired_state(target, db, cluster).await;
 
@@ -375,7 +377,7 @@ async fn handle_transition(
 pub async fn desired_state(
     target: &str,
     db: &DatabaseConnection,
-    cluster: &RegexCluster,
+    cluster: &Box<dyn ClusterTrait>,
 ) -> (TargetStatus, String) {
     let t = entities::target::Entity::from_name(target, db, cluster).await;
     let t = match t {

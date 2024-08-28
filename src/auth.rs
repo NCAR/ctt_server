@@ -6,7 +6,6 @@ use axum::http::header;
 use axum::Extension;
 use chrono::{NaiveDateTime, Utc};
 use http::StatusCode;
-#[allow(unused_imports)]
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use lazy_static::lazy_static;
 use rand::{distributions::Alphanumeric, Rng};
