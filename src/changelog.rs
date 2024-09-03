@@ -4,27 +4,11 @@ use slack_morphism::{
     prelude::SlackApiChatPostMessageRequest, prelude::SlackClientHyperConnector, SlackApiToken,
     SlackApiTokenValue, SlackClient, SlackMessageContent,
 };
-#[cfg(feature = "slack")]
 use std::collections::{BTreeMap, BTreeSet};
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 #[allow(unused_imports)]
 use tracing::{info, instrument, warn, Level};
-
-#[cfg(not(feature = "slack"))]
-#[instrument]
-pub async fn slack_updater(mut rx: mpsc::Receiver<String>, _conf: Conf) {
-    let mut updates = vec![];
-    while let Some(u) = rx.recv().await {
-        updates.push(u);
-    }
-    if updates.is_empty() {
-        return;
-    }
-    for m in updates {
-        info!(m);
-    }
-}
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub enum ChangeLogMsg {
@@ -54,15 +38,18 @@ pub enum ChangeLogMsg {
     },
 }
 
-#[cfg(feature = "slack")]
 #[instrument(skip(conf))]
 pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
     let mut interval = time::interval(Duration::from_secs(conf.poll_interval * 6));
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
+    #[cfg(feature = "slack")]
     let connector = SlackClientHyperConnector::new().unwrap();
+    #[cfg(feature = "slack")]
     let client = SlackClient::new(connector);
+    #[cfg(feature = "slack")]
     let token_value: SlackApiTokenValue = conf.slack.token.into();
+    #[cfg(feature = "slack")]
     let token: SlackApiToken = SlackApiToken::new(token_value);
     //title: issues
     let mut close_issues: BTreeMap<String, BTreeSet<i32>> = BTreeMap::new();
@@ -135,6 +122,7 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                     continue;
                 }
 
+                #[cfg(feature = "slack")]
                 let session = client.open_session(&token);
 
                 let mut msg  = format!("{:?}", operators);
@@ -154,14 +142,20 @@ pub async fn slack_updater(mut rx: mpsc::Receiver<ChangeLogMsg>, conf: Conf) {
                     msg.push_str(&format!("\nResumed: {:?}", resume_nodes));
                 }
 
+                #[cfg(feature = "slack")]
                 let post_chat_req = SlackApiChatPostMessageRequest::new(
                     format!("#{}", conf.slack.channel).into(),
                     SlackMessageContent::new().with_text(msg),
                 );
 
+                #[cfg(feature = "slack")]
                 if let Err(e) = session.chat_post_message(&post_chat_req).await {
                     warn!("error sending slack message {}", e);
                 };
+
+                #[cfg(not(feature = "slack"))]
+                info!("{}", msg);
+
                 close_issues = BTreeMap::new();
                 update_issues = BTreeMap::new();
                 open_issues = BTreeSet::new();

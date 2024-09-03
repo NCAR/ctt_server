@@ -237,28 +237,6 @@ fn node_group(
     }
 }
 
-#[instrument(skip(status))]
-fn to_offline(
-    target: &str,
-    status: pbs::StatResp,
-    group: Option<issue::ToOffline>,
-    cluster: &Box<dyn ClusterTrait>,
-) -> Vec<String> {
-    let to_offline = node_group(target, group, cluster);
-    status
-        .resources
-        .into_iter()
-        //only care about nodes in `to_offline`
-        .filter(|n| to_offline.iter().any(|t| n.name().eq(t)))
-        .filter(|t| t.name().ne(target))
-        //only care about ones that aren't already offline
-        .filter(|n| {
-            &pbs::Attrl::Value(pbs::Op::Equal("offline".to_string()))
-                != n.attribs().get("state").unwrap()
-        })
-        .map(|n| n.name())
-        .collect()
-}
 #[instrument]
 pub async fn issue_open(
     i: &NewIssue,

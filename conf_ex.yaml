@@ -1,15 +1,20 @@
-poll_interval: 30
+poll_interval: 3000
 slack:
   channel: "my-test-channel"
   token: "xoxb-todo"
-cluster:
-  prefix: "gu"
-db: "/var/ctt/db.sqlite"
-certs_dir: "/etc/ctt/certs"
+db: "./db.sqlite"
+certs_dir: "./certs"
 server_addr: "127.0.0.1:8080"
-node_types: 
-  - { prefix: "gug", digits: 4, slot: 2 }
-  - { prefix:"guc", digits: 4, board: 2, slot: 4}
 auth:
   admin: ["hsg", "ssg"]
   guest: ["ncar", "root"]
+cluster:
+  shell:
+    siblings_cmd: "todo"
+    cousins_cmd: "todo"
+    real_node_cmd: "todo"
+scheduler:
+  shell: 
+    status_cmd: "todo"
+    release_cmd: "todo"
+    offline_cmd: "todo"

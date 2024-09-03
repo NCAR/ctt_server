@@ -19,8 +19,8 @@ http = "1"
 http-body = "1"
 jsonwebtoken = "9"
 lazy_static = "1"
-munge_auth = "0.1.1"
-pbs = "0.0.6"
+munge_auth = { version = "0.1.1", optional = true}
+pbs = { version = "0.0.6", optional = true }
 rand = "0.8"
 sea-orm = { version="1", features = ["with-chrono", "sqlx-sqlite", "runtime-tokio-rustls", "macros"]}
 sea-orm-migration = "1"
@@ -36,9 +36,10 @@ users = "0.11"
 regex = "1"
 
 [features]
-default = ["slack"]
+default = ["slack", "pbs", "munge"]
 slack = ["slack-morphism"]
 auth = []
+munge = ["munge_auth", "auth"]
 
 
 [package.metadata.generate-rpm]

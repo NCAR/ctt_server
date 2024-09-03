@@ -12,8 +12,10 @@ pub(crate) trait SchedulerInnerTrait {
     fn offline_node(&mut self, target: &str, comment: &str) -> Result<(), String>;
 }
 
+#[cfg(feature = "pbs")]
 mod pbs_scheduler;
 mod shell_scheduler;
+#[cfg(feature = "pbs")]
 pub use pbs_scheduler::PbsScheduler;
 pub use shell_scheduler::ShellScheduler;
 

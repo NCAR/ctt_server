@@ -10,6 +10,8 @@ mod sync;
 use crate::conf::Conf;
 use async_graphql::{extensions::Tracing, http::GraphiQLSource, EmptySubscription, Schema};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
+#[cfg(not(feature = "auth"))]
+use auth::Role;
 use axum::{
     error_handling::HandleErrorLayer,
     extract::Extension,
@@ -121,8 +123,8 @@ async fn main() {
         .await
         .unwrap();
 }
-
 #[instrument(skip(schema, req))]
+#[cfg(feature = "auth")]
 async fn graphql_handler(
     schema: Extension<model::CttSchema>,
     Extension(role): Extension<auth::RoleGuard>,
@@ -130,6 +132,19 @@ async fn graphql_handler(
 ) -> GraphQLResponse {
     let mut req = req.into_inner();
     req = req.data(role);
+    let resp = schema.execute(req).await;
+    info!("{:?}", &resp);
+    resp.into()
+}
+
+#[cfg(not(feature = "auth"))]
+#[instrument(skip(schema, req))]
+async fn graphql_handler(
+    schema: Extension<model::CttSchema>,
+    req: GraphQLRequest,
+) -> GraphQLResponse {
+    let mut req = req.into_inner();
+    req = req.data(Role::Admin);
     let resp = schema.execute(req).await;
     info!("{:?}", &resp);
     resp.into()

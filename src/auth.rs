@@ -2,16 +2,22 @@ use crate::conf::{Auth, Conf};
 use async_graphql::{Context, Guard, Result};
 use axum::body::Body;
 use axum::extract;
+#[cfg(feature = "auth")]
 use axum::http::header;
 use axum::Extension;
 use chrono::{NaiveDateTime, Utc};
 use http::StatusCode;
+#[cfg(feature = "auth")]
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+#[cfg(not(feature = "auth"))]
+use jsonwebtoken::{encode, EncodingKey, Header};
 use lazy_static::lazy_static;
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "auth")]
 use std::collections::HashSet;
 use tower_http::validate_request::ValidateRequest;
+#[allow(unused_imports)]
 use tracing::{debug, info, warn};
 
 lazy_static! {
@@ -29,8 +35,10 @@ impl<B> ValidateRequest<B> for Auth {
 
     fn validate(
         &mut self,
+        #[allow(unused_variables)] //unused if auth disabled
         request: &mut axum::http::Request<B>,
     ) -> axum::response::Result<(), axum::response::Response> {
+        #[cfg(feature = "auth")]
         if let Some(user) = self.check_auth(request) {
             // Set `user_id` as a request extension so it can be accessed by other
             // services down the stack.
@@ -48,10 +56,13 @@ impl<B> ValidateRequest<B> for Auth {
 
             Err(unauthorized_response)
         }
+        #[cfg(not(feature = "auth"))]
+        Ok(())
     }
 }
 
 impl Auth {
+    #[cfg(feature = "auth")]
     fn check_auth<B>(&self, request: &axum::http::Request<B>) -> Option<RoleGuard> {
         info!("checking auth");
         request
@@ -74,6 +85,7 @@ impl Auth {
             .map(|c| c.claims)
     }
 
+    #[cfg(feature = "auth")]
     async fn check_role(&self, usr: &str, uid: u32) -> Option<Role> {
         let user = users::get_user_by_name(usr)?;
         if user.uid() != uid {
@@ -105,11 +117,15 @@ impl Auth {
     }
 }
 pub async fn login_handler(
+    #[allow(unused_variables)] //unused if auth is disabled
     Extension(conf): Extension<Conf>,
+    #[allow(unused_variables)] //unused if auth is disabled
     extract::Json(raw_payload): extract::Json<AuthRequest>,
 ) -> Result<axum::Json<Token>, (StatusCode, String)> {
+    #[cfg(feature = "auth")]
     match raw_payload {
         // currently munge is the only supported auth method
+        #[cfg(feature = "munge")]
         AuthRequest::Munge(payload) => {
             let payload = munge_auth::unmunge(payload.to_string());
             if let Err(e) = payload {
@@ -148,10 +164,22 @@ pub async fn login_handler(
             Ok(axum::Json(Token { token }))
         }
     }
+    #[cfg(not(feature = "auth"))]
+    {
+        let claims = RoleGuard::new(
+            Role::Admin,
+            "test_user".to_string(),
+            Utc::now().naive_utc() + chrono::Duration::minutes(60),
+        );
+        let key = EncodingKey::from_base64_secret(&SECRET).unwrap();
+        let token = encode(&Header::default(), &claims, &key).unwrap();
+        Ok(axum::Json(Token { token }))
+    }
 }
 
 #[derive(Deserialize, Debug)]
 pub struct UserLogin {
+    #[cfg(feature = "auth")]
     user: String,
 }
 
@@ -163,6 +191,7 @@ pub struct Token {
 #[derive(Deserialize, Debug, Clone)]
 pub enum AuthRequest {
     // munge encrypted Json<UserLogin>
+    #[cfg(feature = "auth")]
     Munge(String),
 }
 

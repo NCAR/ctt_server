@@ -1,5 +1,6 @@
 use crate::conf::{Cluster, Scheduler};
 use crate::entities::target::TargetStatus;
+#[cfg(feature = "pbs")]
 use scheduler::PbsScheduler;
 use std::collections::HashMap;
 mod regex_cluster;
@@ -23,7 +24,10 @@ impl<T: std::fmt::Debug + ClusterInnerTrait + Send + Sync> ClusterTrait for T {}
 
 pub fn new(c: Cluster, s: Scheduler) -> Box<dyn ClusterTrait> {
     let sched: Box<dyn scheduler::SchedulerTrait + Send + Sync> = match s {
+        #[cfg(feature = "pbs")]
         Scheduler::Pbs => Box::new(PbsScheduler::new()),
+        #[cfg(not(feature = "pbs"))]
+        Scheduler::Pbs => panic!("pbs feature not enabled!"),
         Scheduler::Shell(sh) => Box::new(sh),
     };
 
