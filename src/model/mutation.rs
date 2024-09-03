@@ -43,9 +43,9 @@ impl NewIssue {
         title: String,
         target: String,
         to_offline: Option<issue::ToOffline>,
-        cluster: &Box<dyn ClusterTrait>,
+        cluster: &dyn ClusterTrait,
     ) -> Option<Self> {
-        if cluster.real_node(&target) {
+        if (*cluster).real_node(&target) {
             Some(Self {
                 assigned_to,
                 description,
@@ -177,7 +177,7 @@ async fn issue_update(
                 if c == target || siblings.contains(&c) {
                     continue;
                 }
-                let (desired_node_state, _) = crate::sync::desired_state(&c, db, &cluster).await;
+                let (desired_node_state, _) = crate::sync::desired_state(&c, db, &*cluster).await;
                 if desired_node_state == TargetStatus::Online {
                     //TODO add changelog msg
                     if cluster.release_node(&c).is_err() {
@@ -200,7 +200,7 @@ async fn issue_update(
                 if s == target {
                     continue;
                 }
-                let (desired_node_state, _) = crate::sync::desired_state(&s, db, &cluster).await;
+                let (desired_node_state, _) = crate::sync::desired_state(&s, db, &*cluster).await;
                 if desired_node_state == TargetStatus::Online {
                     //TODO add changelog msg
                     cluster.release_node(&s).unwrap();
@@ -225,7 +225,7 @@ async fn issue_update(
 fn node_group(
     target: &str,
     group: Option<issue::ToOffline>,
-    cluster: &Box<dyn ClusterTrait>,
+    cluster: &dyn ClusterTrait,
 ) -> Vec<String> {
     match group {
         None => vec![],
@@ -243,7 +243,7 @@ pub async fn issue_open(
     operator: &str,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<ChangeLogMsg>,
-    cluster: &Box<dyn ClusterTrait>,
+    cluster: &dyn ClusterTrait,
 ) -> Result<issue::Model, String> {
     if !cluster.real_node(&i.target) {
         return Err(format!("{} is not a real node", &i.target));
@@ -343,7 +343,7 @@ impl Mutation {
         let db = ctx.data_opt::<Arc<DatabaseConnection>>().unwrap().as_ref();
         let conf = ctx.data::<Conf>().unwrap();
         let cluster = cluster::new(conf.cluster.clone(), conf.scheduler.clone());
-        issue_open(&issue, usr, db, tx, &cluster).await
+        issue_open(&issue, usr, db, tx, &*cluster).await
     }
     #[graphql(guard = "RoleChecker::new(Role::Admin)")]
     #[instrument(skip(ctx))]

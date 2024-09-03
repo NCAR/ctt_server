@@ -21,7 +21,7 @@ use tracing::{debug, info, instrument, trace, warn};
 
 async fn get_expected_state(
     db: &DatabaseConnection,
-    cluster: &Box<dyn ClusterTrait>,
+    cluster: &dyn ClusterTrait,
 ) -> HashMap<String, TargetStatus> {
     let mut des_state = HashMap::new();
 
@@ -85,7 +85,7 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
         }
         let pbs_node_state = pbs_node_state.unwrap();
         let mut ctt_node_state = get_ctt_nodes(db).await;
-        let desired_state = get_expected_state(db, &cluster).await;
+        let desired_state = get_expected_state(db, &*cluster).await;
 
         //add any pbs nodes not in ctt into ctt for tracking
         pbs_node_state
@@ -109,7 +109,7 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
                     new_state,
                     db,
                     &tx,
-                    &mut cluster,
+                    &mut *cluster,
                 )
                 .await;
             } else {
@@ -120,9 +120,9 @@ pub async fn cluster_sync(db: Arc<DatabaseConnection>, conf: Conf, tx: mpsc::Sen
                     "Node not found in pbs".to_string(),
                     target.to_string(),
                     None,
-                    &cluster,
+                    &*cluster,
                 ) {
-                    mutation::issue_open(&new_issue, "ctt", db, &tx, &cluster)
+                    mutation::issue_open(&new_issue, "ctt", db, &tx, &*cluster)
                         .await
                         .unwrap();
                 }
@@ -164,7 +164,7 @@ pub async fn get_ctt_nodes(db: &DatabaseConnection) -> HashMap<String, TargetSta
 pub async fn related_closing(
     target: &str,
     db: &DatabaseConnection,
-    cluster: &Box<dyn ClusterTrait>,
+    cluster: &dyn ClusterTrait,
 ) -> Vec<entities::issue::Model> {
     let mut issues = Vec::new();
     let t = entities::target::Entity::from_name(target, db, cluster).await;
@@ -238,11 +238,7 @@ pub async fn related_closing(
 }
 
 #[instrument(skip(db))]
-pub async fn close_open_issues(
-    target: &str,
-    db: &DatabaseConnection,
-    cluster: &Box<dyn ClusterTrait>,
-) {
+pub async fn close_open_issues(target: &str, db: &DatabaseConnection, cluster: &dyn ClusterTrait) {
     for issue in entities::target::Entity::from_name(target, db, cluster)
         .await
         .unwrap()
@@ -276,7 +272,7 @@ async fn handle_transition(
     new_state: &TargetStatus,
     db: &DatabaseConnection,
     tx: &mpsc::Sender<ChangeLogMsg>,
-    cluster: &mut Box<dyn ClusterTrait>,
+    cluster: &mut dyn ClusterTrait,
 ) {
     //let (expected_state, comment) = desired_state(target, db, cluster).await;
 
@@ -309,7 +305,7 @@ async fn handle_transition(
                     new_comment.to_string(),
                     target.to_string(),
                     None,
-                    cluster,
+                    &*cluster,
                 ) {
                     info!("opening issue for {}: {}", target, new_comment);
                     mutation::issue_open(&new_issue, "ctt", db, tx, cluster)
@@ -377,7 +373,7 @@ async fn handle_transition(
 pub async fn desired_state(
     target: &str,
     db: &DatabaseConnection,
-    cluster: &Box<dyn ClusterTrait>,
+    cluster: &dyn ClusterTrait,
 ) -> (TargetStatus, String) {
     let t = entities::target::Entity::from_name(target, db, cluster).await;
     let t = match t {

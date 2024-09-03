@@ -45,7 +45,7 @@ impl Model {
         let db = ctx.data::<Arc<DatabaseConnection>>().unwrap().as_ref();
         let conf = ctx.data::<Conf>().unwrap();
         let cluster = cluster::new(conf.cluster.clone(), conf.scheduler.clone());
-        self.get_related(db, &cluster).await
+        self.get_related(db, &*cluster).await
     }
 }
 impl Model {
@@ -61,7 +61,7 @@ impl Model {
     pub async fn get_related(
         &self,
         db: &DatabaseConnection,
-        cluster: &Box<dyn ClusterTrait>,
+        cluster: &dyn ClusterTrait,
     ) -> Vec<target::Model> {
         let mut related: Vec<target::Model> = vec![];
         let tar = self.get_target(db).await;

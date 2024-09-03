@@ -47,7 +47,7 @@ impl Entity {
     pub async fn from_name(
         name: &str,
         db: &DatabaseConnection,
-        cluster: &Box<dyn ClusterTrait>,
+        cluster: &dyn ClusterTrait,
     ) -> Option<Model> {
         if !cluster.real_node(name) {
             debug!("request node {} is not real", name);
@@ -72,7 +72,7 @@ impl Entity {
         name: &str,
         state: TargetStatus,
         db: &DatabaseConnection,
-        cluster: &Box<dyn ClusterTrait>,
+        cluster: &dyn ClusterTrait,
     ) -> Option<Model> {
         if !cluster.real_node(name) {
             warn!("Tried making target for fake node {}", name);
