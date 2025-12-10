@@ -1,7 +1,7 @@
 [package]
 name = "cttd"
 version = "0.3.10"
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Graphql api for CTT"
 repository = "https://github.com/Will-Shanks/ctt_server"

@@ -1,4 +1,3 @@
-#![feature(let_chains)]
 #![feature(addr_parse_ascii)]
 mod changelog;
 mod cluster;
