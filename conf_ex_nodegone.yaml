@@ -1,0 +1,17 @@
+poll_interval: 30
+slack:
+  channel: "my-test-channel"
+  token: "xoxb-todo"
+cluster:
+  prefix: "casper"
+db: "/var/ctt/db.sqlite"
+certs_dir: "/etc/ctt/certs"
+server_addr: "127.0.0.1:8080"
+node_types:
+  - { prefix: "casper", digits: 2, start: 01 end: 19 }
+  - { prefix: "casper", digits: 2, start: 21 end: 99 }
+  - { prefix: "crhtc", digits: 2 }
+  - { prefix: "crhtc", digits: 3 }
+auth:
+  admin: ["hsg", "ssg"]
+  guest: ["ncar", "root"]

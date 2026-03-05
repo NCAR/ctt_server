@@ -16,6 +16,10 @@ GraphQL api server for CTT
 - client needs cert
 - `cargo run --no-default-features -F gust`
 
+## Removing Machines from Consideration Casper20 as example
+- in conf.yaml  add in a {prefix: casper, digits:2 start: 01, end: 19 } as a before stanza and {prefix: casper, digits:2 start: 21, end: 99 }
+- in the sqlite database remove the offending name from the database
+
 ## querys
 ```
 mutation OpenIssue($newIssue: NewIssue!) {
